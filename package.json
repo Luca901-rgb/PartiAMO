@@ -1,0 +1,24 @@
+{
+  "name": "partiamo",
+  "version": "1.0.0",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js",
+    "worker": "node src/worker.js",
+    "test": "echo \"No tests configured\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^4.21.2",
+    "nodemailer": "^8.0.7",
+    "sqlite3": "^6.0.1"
+  }
+}

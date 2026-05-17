@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <script nowprocket data-noptimize="1" data-cfasync="false" data-wpfc-render="false" seraph-accel-crit="1" data-no-defer="1">
+      (function () {
+          var script = document.createElement("script");
+          script.async = 1;
+          script.src = 'https://tp-em.com/NTI2MjM3.js?t=526237';
+          document.head.appendChild(script);
+      })();
+    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Registrati - Partiamo</title>
+    <link rel="icon" href="/partiamo-logo-banner.svg" type="image/svg+xml" sizes="any" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <section class="register-shell">
+        <article class="register-header fade-up">
+          <h1>Configura il tuo alert viaggio</h1>
+          <p>Completa il profilo: ti avvisiamo solo quando troviamo una combinazione volo+hotel davvero conveniente.</p>
+        </article>
+      <article class="card register-form-card fade-up">
+        <form id="registerForm" style="margin-top: 2px">
+          <div class="grid grid-2">
+            <div>
+              <label for="nome">Nome e email</label>
+              <input id="nome" name="nome" placeholder="Nome" required />
+              <input id="email" name="email" type="email" placeholder="Email" required style="margin-top:8px" />
+            </div>
+            <div>
+              <label for="aeroporto_partenza">Aeroporto di partenza</label>
+              <div class="autocomplete-wrap">
+                <input
+                  type="text"
+                  id="aeroporto_partenza"
+                  name="aeroporto_partenza"
+                  required
+                  placeholder="Cerca aeroporto nel mondo (es. Tokyo, JFK)"
+                  autocomplete="off"
+                  aria-autocomplete="list"
+                  aria-controls="airport-suggestions"
+                />
+                <ul id="airport-suggestions" class="autocomplete-suggestions" hidden role="listbox"></ul>
+              </div>
+            </div>
+            <div>
+              <label for="budget">Budget totale in euro: <span id="budgetLabel">300</span>€</label>
+              <input id="budget" name="budget" type="range" min="100" max="2000" value="300" />
+            </div>
+            <div><label>Numero persone</label><select name="persone"><option>1</option><option>2</option><option>3</option><option>4+</option></select></div>
+            <div><label>Durata viaggio</label><select name="durata"><option>3</option><option>4</option><option>5</option><option>7</option></select></div>
+            <div><label>Tipo destinazione</label><select name="destinazione_tipo"><option>Mare</option><option>Città</option><option>Montagna</option><option>Ovunque</option></select></div>
+            <div>
+              <label for="destinazione_preferita">Dove vuoi andare</label>
+              <input id="destinazione_preferita" name="destinazione_preferita" list="destinazioni-list" placeholder="Cerca aeroporto o città nel mondo (es. Tokyo, JFK)" />
+              <datalist id="destinazioni-list">
+                <option value="Lisbona"></option>
+                <option value="Parigi"></option>
+                <option value="Barcellona"></option>
+                <option value="Atene"></option>
+                <option value="Londra"></option>
+                <option value="Madrid"></option>
+                <option value="Malta"></option>
+                <option value="Santorini"></option>
+                <option value="New York"></option>
+                <option value="Dubai"></option>
+              </datalist>
+              <label class="destination-surprise">
+                <input type="checkbox" name="destinazione_sorpresa" id="destinazione_sorpresa" value="1" />
+                Destinazione a sorpresa
+              </label>
+            </div>
+            <div><label>Fascia oraria volo</label><select name="fascia_oraria"><option>Mattina 06-12</option><option>Pomeriggio 12-18</option><option>Sera 18-24</option><option>Indifferente</option></select></div>
+            <div><label>Tipo volo</label><select name="tipo_volo"><option>Diretto</option><option>Con scalo</option><option>Indifferente</option></select></div>
+            <div><label>Distanza dal mare</label><select name="distanza_mare"><option>Meno 5 min a piedi</option><option>5-15 min</option><option>Indifferente</option></select></div>
+            <div><label>Distanza dal centro</label><select name="distanza_centro"><option>Meno 5 min a piedi</option><option>5-15 min</option><option>Indifferente</option></select></div>
+            <div><label>Rating minimo hotel</label><select name="rating_minimo"><option>7.0</option><option>7.5</option><option>8.0</option><option>8.5</option></select></div>
+            <div><label>Tipo struttura</label><select name="tipo_struttura"><option>Solo hotel</option><option>Solo appartamenti</option><option>Entrambe</option></select></div>
+            <div><label>Tipo pasto</label><select name="tipo_pasto"><option>Solo pernotto</option><option>Mezza pensione</option><option>Pensione completa</option></select></div>
+            <div><label>Tipo camera</label><select name="tipo_camera"><option>Doppia</option><option>Matrimoniale</option></select></div>
+            <div><label>Bagaglio</label><select name="bagaglio"><option>Solo cabina</option><option>Stiva inclusa</option></select></div>
+          </div>
+          <button class="btn btn-primary" type="submit">Attiva alert</button>
+          <button class="btn" type="button" id="liveSearchBtn">Cerca ora in tempo reale</button>
+          <input type="hidden" name="prezzo_riferimento" id="prezzo_riferimento" />
+          <p id="formMsg"></p>
+        </form>
+        <article class="card" id="liveResult" style="display:none; margin-top:12px">
+          <h3>Migliore risultato adesso</h3>
+          <p><strong>Tratta:</strong> <span id="liveRoute"></span></p>
+          <p><strong>Prezzo:</strong> <span class="pill-price" id="livePrice"></span></p>
+          <p><span class="badge" id="liveSaving"></span></p>
+          <p>Se attivi l'alert, riceverai email solo quando troviamo un prezzo migliore di questo.</p>
+        </article>
+      </article>
+      </section>
+    </main>
+    <script src="/registrati.js"></script>
+  </body>
+</html>

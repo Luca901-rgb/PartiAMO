@@ -1,0 +1,156 @@
+{
+  "BCN": [
+    {
+      "hotel_key": "g187497-d228524",
+      "official_name": "Hotel Barcelona Catedral",
+      "match": ["Barcelona Catedral", "Catedral"]
+    },
+    {
+      "hotel_key": "g187497-d228518",
+      "official_name": "Hotel REC Barcelona",
+      "match": ["REC Barcelona", "REC Hotel Barcelona"]
+    },
+    {
+      "hotel_key": "g187497-d232059",
+      "official_name": "Hotel Barcelona Universal",
+      "match": ["Barcelona Universal"]
+    },
+    {
+      "hotel_key": "g187497-d190635",
+      "official_name": "Hotel Arts Barcelona",
+      "match": ["Arts Barcelona", "Hotel Arts"]
+    },
+    {
+      "hotel_key": "g187497-d190569",
+      "official_name": "W Barcelona",
+      "match": ["W Hotel Barcelona"]
+    }
+  ],
+  "ROM": [
+    {
+      "hotel_key": "g187791-d228716",
+      "official_name": "The Independent Hotel",
+      "match": ["Independent Hotel Rome"]
+    },
+    {
+      "hotel_key": "g187791-d199833",
+      "official_name": "Hotel Indigo Rome - St. George",
+      "match": ["Indigo St George", "Indigo Rome"]
+    },
+    {
+      "hotel_key": "g187791-d229687",
+      "official_name": "Hotel Artemide",
+      "match": ["Artemide Rome"]
+    },
+    {
+      "hotel_key": "g187791-d203087",
+      "official_name": "The St. Regis Rome",
+      "match": ["St Regis Rome"]
+    }
+  ],
+  "MIL": [
+    {
+      "hotel_key": "g187849-d230413",
+      "official_name": "The Westin Palace Milan",
+      "match": ["Westin Palace Milan"]
+    }
+  ],
+  "MAD": [
+    {
+      "hotel_key": "g187514-d206977",
+      "official_name": "NH Collection Madrid Nacional",
+      "match": ["NH Nacional Madrid"]
+    },
+    {
+      "hotel_key": "g187514-d501066",
+      "official_name": "Novotel Madrid Center",
+      "match": ["Novotel Madrid"]
+    }
+  ],
+  "PAR": [
+    {
+      "hotel_key": "g187147-d232059",
+      "official_name": "Hotel Paris (centro)",
+      "match": ["Paris centre", "Hotel Paris"]
+    },
+    {
+      "hotel_key": "g187147-d228524",
+      "official_name": "Hotel Paris (Marais)",
+      "match": ["Paris Marais", "Marais hotel"]
+    },
+    {
+      "hotel_key": "g187147-d229217",
+      "official_name": "Hotel Paris (Rive Gauche)",
+      "match": ["Paris Rive Gauche", "Left Bank Paris"]
+    },
+    {
+      "hotel_key": "g187147-d228518",
+      "official_name": "Hotel Paris (Opéra)",
+      "match": ["Paris Opera", "Opera district Paris"]
+    },
+    {
+      "hotel_key": "g187147-d233932",
+      "official_name": "Ibis Styles Paris",
+      "match": ["Ibis Styles Paris", "Ibis Paris"]
+    },
+    {
+      "hotel_key": "g187147-d188975",
+      "official_name": "Shangri-La Paris",
+      "match": ["Shangri-La Hotel Paris"]
+    }
+  ],
+  "LON": [
+    {
+      "hotel_key": "g186338-d188450",
+      "official_name": "Strand Palace Hotel",
+      "match": ["Strand Palace London"]
+    }
+  ],
+  "ATH": [
+    {
+      "hotel_key": "g189400-d202731",
+      "official_name": "Hotel Grande Bretagne",
+      "match": ["Grande Bretagne Athens"]
+    },
+    {
+      "hotel_key": "g189400-d10961869",
+      "official_name": "Wyndham Grand Athens",
+      "match": ["Wyndham Grand Athens"]
+    }
+  ],
+  "BKK": [
+    {
+      "hotel_key": "g297930-d305178",
+      "official_name": "Amari Bangkok",
+      "match": ["Amari Watergate Bangkok"]
+    }
+  ],
+  "NAP": [
+    {
+      "hotel_key": "g187782-d203083",
+      "official_name": "Grand Hotel Vesuvio",
+      "match": ["Vesuvio Naples"]
+    }
+  ],
+  "FLR": [
+    {
+      "hotel_key": "g187895-d233472",
+      "official_name": "Hotel Savoy",
+      "match": ["Savoy Florence"]
+    }
+  ],
+  "BER": [
+    {
+      "hotel_key": "g187323-d188451",
+      "official_name": "Hotel Adlon Kempinski",
+      "match": ["Adlon Berlin"]
+    }
+  ],
+  "DXB": [
+    {
+      "hotel_key": "g295424-d87716",
+      "official_name": "Crowne Plaza Dubai Deira",
+      "match": ["Crowne Plaza Deira"]
+    }
+  ]
+}

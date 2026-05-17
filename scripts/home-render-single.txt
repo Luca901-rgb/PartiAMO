@@ -1,0 +1,87 @@
+function renderSingleStay22Results(preview, insurance, wasSurprise) {
+  const results = document.getElementById("results");
+  const f = preview.flight;
+  const airHelpHref = f.airHelpLink || AFFILIATE_AIRHELP_FALLBACK;
+  const fromLabel = preview.partenza;
+  const destLabel = wasSurprise ? "?" : f.destination;
+  const destReal = f.destination;
+  const budgetNum = Number(preview.budget) || 0;
+  const fpEuro = Math.round(Number(preview.flight_price_euro != null ? preview.flight_price_euro : f.price) || 0);
+  const hotelQuota = Math.floor(Number(preview.hotel_stay_quota) || 0);
+  const nights = Math.max(1, Number(preview.stay_nights) || 1);
+  const risparmioNum = Number(preview.risparmio);
+  const embedSrc = escHtml(buildStay22EmbedSrc(preview));
+  const kiwiHref = escHtml(effectiveFlightUrl(f));
+  const flightBtn = flightButtonLabel(null, f);
+  const stayDisclaimer =
+    String(preview.stay_pricing_disclaimer || "").trim() ||
+    "Volo con prezzo reale. Hotel su Stay22 entro la quota residua del budget.";
+  const cityShown = escHtml(sanitizeCityForStay22(preview.destination_city || f.destination || ""));
+
+  let html = `<div style="max-width:640px;margin:0 auto;padding:0 0 3rem;">`;
+
+  if (wasSurprise) {
+    html += `<div class="surprise-card" id="surprise-card">
+      <div class="surprise-icon">🎲</div>
+      <h3>Destinazione nascosta!</h3>
+      <p>Volo nel budget — rivela la meta per vedere gli hotel.</p>
+      <button type="button" class="reveal-btn" id="reveal-dest-btn">✨ Rivela la destinazione</button>
+    </div>`;
+  }
+
+  html += `<div class="results-label">La tua offerta</div>
+  <p class="packages-route-line" id="packages-route-line">${escHtml(`${fromLabel} → ${destLabel}`)} · ${escHtml(f.departDate)} → ${escHtml(f.returnDate)}</p>`;
+
+  if (budgetNum > 0) {
+    html += `<div class="results-budget-summary"><p><strong>Budget €${budgetNum}</strong> · Volo <strong>€${fpEuro}</strong> · Alloggio fino a <strong>€${hotelQuota}</strong> (${nights} notti).</p><p class="results-budget-summary__sub">${escHtml(stayDisclaimer)}</p></div>`;
+  }
+
+  html += `<article class="package-card package-card--single">
+    <div class="package-card__top">
+      <span class="package-card__badge">Volo + hotel</span>
+      <div class="package-card__total">
+        <span class="package-card__total-label">Volo quotato</span>
+        <strong class="package-card__total-eur">€${fpEuro}</strong>
+      </div>
+    </div>
+    <p class="package-card__quota-hint">Hotel a <strong>${cityShown}</strong> · max <strong>€${hotelQuota}</strong> totale · ${nights} notti</p>
+    <div class="package-card__actions package-card__actions--flight">
+      <a href="${kiwiHref}" target="_blank" rel="noopener noreferrer sponsored" class="package-btn package-btn--kiwi">${escHtml(flightBtn)}</a>
+      <a href="${escHtml(airHelpHref)}" target="_blank" rel="noopener noreferrer sponsored" class="package-btn package-btn--outline">AirHelp</a>
+    </div>
+    <div class="stay22-embed-wrap">
+      <p class="stay22-embed-label">Miglior hotel nel budget — prezzi live Stay22</p>
+      <iframe class="stay22-embed-frame" title="Hotel ${cityShown}" src="${embedSrc}" width="100%" height="480" frameborder="0" loading="lazy"></iframe>
+    </div>
+    <p class="package-card__fineprint">Prezzi hotel da Stay22 (Booking, Agoda, Expedia…). Il volo si prenota separatamente.</p>
+  </article>`;
+
+  html += `<p class="hotel-stay22-note">Un risultato hotel filtrato sul budget residuo dopo il volo.</p>`;
+
+  html += `<div class="total-card">
+    <div class="total-rows">
+      ${budgetNum > 0 ? `<div class="total-row-item total-row-item--budget"><span>🎯 Budget</span><span>€${budgetNum}</span></div>` : ""}
+      <div class="total-row-item"><span>✈️ Volo</span><span>€${fpEuro}</span></div>
+      <div class="total-row-item"><span>🏨 Quota hotel (max)</span><span>€${hotelQuota}</span></div>
+      ${Number.isFinite(risparmioNum) && risparmioNum >= 0 && budgetNum > 0 ? `<div class="total-row-item"><span>💚 Margine</span><span>~€${risparmioNum}</span></div>` : ""}
+    </div>
+    <a href="/offerta-live" class="prenota-btn" style="text-align:center;text-decoration:none;display:block">Apri pagina risultati →</a>
+    <p style="text-align:center;margin-top:0.75rem;font-size:0.85rem;opacity:0.9"><a href="/registrati" style="color:white;text-decoration:underline">Attiva alert email</a></p>
+  </div></motion>`;
+
+  results.innerHTML = html;
+  results.classList.add("show");
+  results.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  if (wasSurprise) {
+    document.getElementById("reveal-dest-btn").addEventListener("click", () => {
+      const card = document.getElementById("surprise-card");
+      card.innerHTML = `<div class="surprise-icon">🎉</div><h3>La tua destinazione è... <em style="color:var(--sun)">${escHtml(destReal)}!</em></h3><p>L'hotel migliore nel budget è sotto.</p>`;
+      card.style.borderColor = "#86efac";
+      card.style.background = "#f0fdf4";
+      const routeLine = document.getElementById("packages-route-line");
+      if (routeLine) routeLine.textContent = `${fromLabel} → ${destReal} · ${f.departDate} → ${f.returnDate}`;
+    });
+  }
+}
+

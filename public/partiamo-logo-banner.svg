@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 690 220" width="690" height="220" role="img" aria-labelledby="partiamo-banner-title">
+  <title id="partiamo-banner-title">PartiAMO banner logo</title>
+  <desc>Banner PartiAMO con aereo stilizzato, stelle e testo del brand</desc>
+
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#111827"/>
+      <stop offset="55%" stop-color="#1e3a5f"/>
+      <stop offset="100%" stop-color="#172554"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="690" height="220" rx="0" fill="url(#sky)"/>
+
+  <g fill="#ffffff" opacity="0.65">
+    <circle cx="60" cy="30" r="1.5" opacity="0.7"/>
+    <circle cx="120" cy="18" r="1" opacity="0.5"/>
+    <circle cx="200" cy="40" r="1.5" opacity="0.6"/>
+    <circle cx="290" cy="15" r="1" opacity="0.4"/>
+    <circle cx="370" cy="35" r="2" opacity="0.8"/>
+    <circle cx="440" cy="12" r="1" opacity="0.5"/>
+    <circle cx="520" cy="28" r="1.5" opacity="0.6"/>
+    <circle cx="600" cy="20" r="1" opacity="0.4"/>
+    <circle cx="640" cy="45" r="1.5" opacity="0.7"/>
+    <circle cx="30" cy="55" r="1" opacity="0.3"/>
+    <circle cx="160" cy="70" r="1" opacity="0.4"/>
+    <circle cx="490" cy="55" r="1" opacity="0.5"/>
+    <circle cx="650" cy="70" r="1.5" opacity="0.3"/>
+  </g>
+
+  <ellipse cx="345" cy="210" rx="300" ry="70" fill="#1a56db" opacity="0.22"/>
+  <ellipse cx="345" cy="210" rx="180" ry="45" fill="#d97706" opacity="0.12"/>
+
+  <g fill="#1a56db" opacity="0.35">
+    <ellipse cx="90" cy="155" rx="55" ry="18"/>
+    <ellipse cx="65" cy="155" rx="32" ry="14"/>
+    <ellipse cx="115" cy="150" rx="38" ry="13" opacity="0.85"/>
+  </g>
+  <g fill="#1a56db" opacity="0.28">
+    <ellipse cx="580" cy="160" rx="60" ry="18"/>
+    <ellipse cx="555" cy="158" rx="35" ry="13"/>
+    <ellipse cx="610" cy="155" rx="40" ry="12" opacity="0.85"/>
+  </g>
+
+  <g transform="translate(90, 88) rotate(-8)">
+    <ellipse cx="55" cy="12" rx="52" ry="10" fill="#e8f0fe"/>
+    <path d="M105 12 Q122 12 118 8 Q114 4 105 8 Z" fill="#c7d8fb"/>
+    <path d="M8 12 Q0 -8 18 -5 L22 8 Z" fill="#1a56db"/>
+    <path d="M10 14 Q-5 22 5 24 L18 16 Z" fill="#1a56db"/>
+    <path d="M10 10 Q-5 2 5 0 L18 8 Z" fill="#1a56db"/>
+    <path d="M50 10 Q55 -18 80 -12 L78 10 Z" fill="#c7d8fb"/>
+    <path d="M50 14 Q55 36 75 30 L74 14 Z" fill="#c7d8fb"/>
+    <rect x="60" y="7" width="8" height="6" rx="2" fill="#1a56db" opacity="0.55"/>
+    <rect x="73" y="7" width="8" height="6" rx="2" fill="#1a56db" opacity="0.55"/>
+    <rect x="86" y="7" width="8" height="6" rx="2" fill="#1a56db" opacity="0.55"/>
+    <ellipse cx="65" cy="28" rx="10" ry="5" fill="#93c5fd" opacity="0.85"/>
+  </g>
+
+  <line x1="90" y1="100" x2="40" y2="115" stroke="#d97706" stroke-width="1.5" stroke-dasharray="4 4" opacity="0.55"/>
+  <line x1="40" y1="115" x2="10" y2="125" stroke="#d97706" stroke-width="1" stroke-dasharray="3 5" opacity="0.35"/>
+
+  <text x="345" y="118" text-anchor="middle" font-size="72" fill="#ffffff" font-family="Georgia, Times New Roman, serif" font-weight="700" letter-spacing="-2">
+    Parti<tspan fill="#d97706">AMO</tspan>
+  </text>
+
+  <g transform="translate(548, 72) rotate(-5) scale(0.45)">
+    <ellipse cx="55" cy="12" rx="52" ry="10" fill="#93c5fd" opacity="0.45"/>
+    <path d="M105 12 Q122 12 118 8 Q114 4 105 8 Z" fill="#93c5fd" opacity="0.35"/>
+    <path d="M8 12 Q0 -8 18 -5 L22 8 Z" fill="#d97706" opacity="0.5"/>
+    <path d="M10 14 Q-5 22 5 24 L18 16 Z" fill="#d97706" opacity="0.4"/>
+    <path d="M10 10 Q-5 2 5 0 L18 8 Z" fill="#d97706" opacity="0.4"/>
+    <path d="M50 10 Q55 -18 80 -12 L78 10 Z" fill="#93c5fd" opacity="0.3"/>
+    <path d="M50 14 Q55 36 75 30 L74 14 Z" fill="#93c5fd" opacity="0.3"/>
+  </g>
+
+  <rect x="0" y="195" width="690" height="25" fill="#1a56db" opacity="0.4"/>
+  <rect x="0" y="207" width="690" height="13" fill="#d97706" opacity="0.18"/>
+  <g fill="#d97706" opacity="0.55">
+    <circle cx="180" cy="207" r="2"/>
+    <circle cx="345" cy="207" r="2"/>
+    <circle cx="510" cy="207" r="2"/>
+  </g>
+</svg>

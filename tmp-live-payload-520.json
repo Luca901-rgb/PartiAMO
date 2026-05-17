@@ -1,0 +1,13 @@
+{
+  "aeroporto_partenza": "NAP",
+  "budget": 520,
+  "persone": "2",
+  "durata": 3,
+  "date_from": "2026-07-01",
+  "date_to": "2026-07-04",
+  "destinazione_tipo": "Ovunque",
+  "destinazione_preferita": "Barcellona",
+  "destinazione_sorpresa": 0,
+  "rating_minimo": 6,
+  "solo_voli_diretti": 0
+}
