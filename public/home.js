@@ -1,6 +1,8 @@
 const AFFILIATE_AIRHELP_FALLBACK = "https://airhelp.tpk.lv/BDuyfeVr";
 const AFFILIATE_KIWI_FALLBACK = "https://kiwi.tpk.lv/UiOvgyTf";
 const FLIGHT_PRICE_STORAGE_KEY = "partiamo_manual_flight_price";
+/** Klook /hotels/city/ non è disponibile su klook.com/it (404). */
+const KLOOK_HOTEL_ORIGIN = "https://www.klook.com/en-GB";
 
 function effectiveFlightUrl(flight, pkg) {
   const u = String(
@@ -136,7 +138,7 @@ function tryKlookListUrlFromSearchResult(u, maxTotalPrice) {
   const checkIn = u.searchParams.get("check_in") || u.searchParams.get("checkIn");
   const checkOut = u.searchParams.get("check_out") || u.searchParams.get("checkOut");
   if (!city || !/^\d{4}-\d{2}-\d{2}$/.test(checkIn) || !/^\d{4}-\d{2}-\d{2}$/.test(checkOut)) return "";
-  const list = new URL("https://www.klook.com/it/hotels/list/");
+  const list = new URL(`${KLOOK_HOTEL_ORIGIN}/hotels/list/`);
   list.searchParams.set("city", city);
   list.searchParams.set("checkIn", checkIn);
   list.searchParams.set("checkOut", checkOut);
@@ -224,7 +226,7 @@ function buildKlookBrowseUrlFromPreview(preview) {
   );
   const citySlug = String(preview?.klook_city_page_slug || "").trim();
   if (citySlug) {
-    const u = new URL(`https://www.klook.com/it/hotels/city/${citySlug}/`);
+    const u = new URL(`${KLOOK_HOTEL_ORIGIN}/hotels/city/${citySlug}/`);
     u.searchParams.set("check_in", checkIn);
     u.searchParams.set("check_out", checkOut);
     u.searchParams.set("adult_num", String(adults));
@@ -232,7 +234,7 @@ function buildKlookBrowseUrlFromPreview(preview) {
   }
   const destSlug = String(preview?.klook_destination_page_slug || "").trim();
   if (destSlug) {
-    const u = new URL(`https://www.klook.com/it/destination/${destSlug}/`);
+    const u = new URL(`${KLOOK_HOTEL_ORIGIN}/destination/${destSlug}/`);
     u.searchParams.set("check_in", checkIn);
     u.searchParams.set("check_out", checkOut);
     u.searchParams.set("adult_num", String(adults));

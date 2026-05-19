@@ -2,6 +2,7 @@ const FLIGHT_FALLBACK_COVER =
   "https://images.unsplash.com/photo-1436491865332-7a61a109cc05?auto=format&fit=crop&w=1400&q=85";
 const AFFILIATE_KIWI_FALLBACK = "https://kiwi.tpk.lv/UiOvgyTf";
 const FLIGHT_PRICE_STORAGE_KEY = "partiamo_manual_flight_price";
+const KLOOK_HOTEL_ORIGIN = "https://www.klook.com/en-GB";
 
 const KLOOK_COPY_DEFAULT =
   "Cerca il volo su Kiwi, inserisci il prezzo totale trovato, poi Partiamo calcola il budget hotel residuo e apre Klook filtrato.";
@@ -255,7 +256,7 @@ function buildKlookBrowseUrlFromPreview(preview) {
   );
   const citySlug = String(preview?.klook_city_page_slug || "").trim();
   if (citySlug) {
-    const u = new URL(`https://www.klook.com/it/hotels/city/${citySlug}/`);
+    const u = new URL(`${KLOOK_HOTEL_ORIGIN}/hotels/city/${citySlug}/`);
     u.searchParams.set("check_in", checkIn);
     u.searchParams.set("check_out", checkOut);
     u.searchParams.set("adult_num", String(adults));
@@ -263,7 +264,7 @@ function buildKlookBrowseUrlFromPreview(preview) {
   }
   const destSlug = String(preview?.klook_destination_page_slug || "").trim();
   if (destSlug) {
-    const u = new URL(`https://www.klook.com/it/destination/${destSlug}/`);
+    const u = new URL(`${KLOOK_HOTEL_ORIGIN}/destination/${destSlug}/`);
     u.searchParams.set("check_in", checkIn);
     u.searchParams.set("check_out", checkOut);
     u.searchParams.set("adult_num", String(adults));

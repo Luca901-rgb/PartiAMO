@@ -12,8 +12,8 @@ const KLOOK_CITY_PAGES = require("./klook-city-pages.json");
 
 
 
-/** Prefisso locale (it) — link diretti su klook.com riducono captcha rispetto ai redirect affiliati. */
-const KLOOK_SITE = String(process.env.KLOOK_SITE_ORIGIN || "https://www.klook.com/it").replace(/\/$/, "");
+/** Hotel Klook: le pagine /hotels/city/ non esistono su /it/ (404). en-GB ha inventario EU in EUR. */
+const KLOOK_SITE = String(process.env.KLOOK_SITE_ORIGIN || "https://www.klook.com/en-GB").replace(/\/$/, "");
 
 const KLOOK_HOTELS_SEARCH_BASE = `${KLOOK_SITE}/hotels/searchresult/`;
 
