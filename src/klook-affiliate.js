@@ -368,7 +368,7 @@ function appendKlookAffiliateTracking(urlString) {
 }
 
 function isKlookHotelBrowseUrl(urlString) {
-  return /klook\.com(?:\/[a-z]{2}(?:-[a-z]{2})?)?\/hotels\/(list|city|searchresult|destination)\b/i.test(
+  return /klook\.com(?:\/[a-z]{2}(?:-[a-z]{2})?)?\/hotels\/(city|searchresult|destination)\b/i.test(
     String(urlString || "")
   );
 }
@@ -753,15 +753,7 @@ function buildKlookHotelSearchUrl({
   });
   if (destUrl) return destUrl;
 
-  return buildKlookHotelsListUrl({
-    city: searchLabel,
-    destIata: iata3,
-    checkIn,
-    checkOut,
-    adults,
-    child_num,
-    maxTotalPrice: total,
-  });
+  return "";
 }
 
 

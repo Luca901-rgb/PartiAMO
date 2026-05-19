@@ -65,9 +65,30 @@ function isKlookHotelUrl(urlString) {
 }
 
 function isKlookHotelBrowseUrl(urlString) {
-  return /klook\.com(?:\/[a-z]{2}(?:-[a-z]{2})?)?\/hotels\/(list|city|searchresult|destination)\b/i.test(
+  return /klook\.com(?:\/[a-z]{2}(?:-[a-z]{2})?)?\/hotels\/(city|searchresult|destination)\b/i.test(
     String(urlString || "")
   );
+}
+
+let klookCityPages = null;
+const klookCityPagesReady = fetch("/klook-city-pages.json")
+  .then((r) => (r.ok ? r.json() : {}))
+  .then((j) => {
+    klookCityPages = j && typeof j === "object" ? j : {};
+    return klookCityPages;
+  })
+  .catch(() => {
+    klookCityPages = {};
+    return klookCityPages;
+  });
+
+function enrichPreviewKlookSlugs(preview) {
+  if (!preview || !klookCityPages) return preview;
+  const iata = String(preview?.flight?.destinationCode || "").toUpperCase();
+  const page = iata && klookCityPages[iata];
+  if (page?.kind === "city" && page.slug) preview.klook_city_page_slug = page.slug;
+  if (page?.kind === "destination" && page.slug) preview.klook_destination_page_slug = page.slug;
+  return preview;
 }
 
 function extractKlookHotelUrl(url) {
@@ -167,15 +188,7 @@ function tryKlookListUrlFromSearchResult(u, maxTotalPrice) {
     "";
   const checkIn = u.searchParams.get("check_in") || u.searchParams.get("checkIn");
   const checkOut = u.searchParams.get("check_out") || u.searchParams.get("checkOut");
-  if (!city || !/^\d{4}-\d{2}-\d{2}$/.test(checkIn) || !/^\d{4}-\d{2}-\d{2}$/.test(checkOut)) return "";
-  const list = new URL("https://www.klook.com/it/hotels/list/");
-  list.searchParams.set("city", city);
-  list.searchParams.set("checkIn", checkIn);
-  list.searchParams.set("checkOut", checkOut);
-  list.searchParams.set("adult", String(Math.max(1, parseInt(u.searchParams.get("adult_num") || "1", 10))));
-  const total = Math.max(0, Math.floor(Number(maxTotalPrice) || 0));
-  if (total >= MIN_KLOOK_MAX_PRICE_EUR) list.searchParams.set("maxPrice", String(total));
-  return list.toString();
+  return "";
 }
 
 function applyKlookBudgetToUrl(urlString, hotelBudgetTotalEuro, stayNights, opts = {}) {
@@ -197,9 +210,7 @@ function applyKlookBudgetToUrl(urlString, hotelBudgetTotalEuro, stayNights, opts
     return u.toString();
   }
   if (/\/hotels\/list\//i.test(pathForKlook)) {
-    u.searchParams.delete("maxPrice");
-    if (total >= MIN_KLOOK_MAX_PRICE_EUR) u.searchParams.set("maxPrice", String(total));
-    return u.toString();
+    return "";
   }
   if (isKlookKeywordSearchUrl(u.toString()) && total < MIN_KLOOK_MAX_PRICE_EUR) {
     taxesOnly = true;
@@ -246,6 +257,7 @@ function isKlookListHotelUrl(urlString) {
 }
 
 function buildKlookBrowseUrlFromPreview(preview) {
+  enrichPreviewKlookSlugs(preview);
   const f = preview?.flight || {};
   const checkIn = String(preview?.requested_check_in || f.departDate || "").slice(0, 10);
   const checkOut = String(preview?.requested_check_out || f.returnDate || "").slice(0, 10);
@@ -290,9 +302,13 @@ function klookBaseFromPreview(preview) {
 function buildManualKlookHref(preview, hotelBudget, opts = {}) {
   const total = Math.max(0, Math.floor(Number(hotelBudget) || 0));
   if (total <= 0) return "";
-  let base = klookBaseFromPreview(preview);
-  if (!base || isKlookListHotelUrl(base)) base = buildKlookBrowseUrlFromPreview(preview);
-  if (!base) return "";
+  enrichPreviewKlookSlugs(preview);
+  let base = buildKlookBrowseUrlFromPreview(preview);
+  if (!base) {
+    const fromTemplate = klookBaseFromPreview(preview);
+    if (fromTemplate && !isKlookListHotelUrl(fromTemplate)) base = fromTemplate;
+  }
+  if (!base || isKlookListHotelUrl(base)) return "";
   return appendKlookAffiliateTracking(
     applyKlookBudgetToUrl(base, total, stayNightsForPreview(preview), opts)
   );
@@ -317,12 +333,17 @@ function klookFilterDetailText(strictPerNight, filterCapPerNight) {
 
 function repairPreviewKlookClient(preview) {
   if (!preview) return preview;
-  let direct = String(
-    preview.klook_hotel_direct_url_template || preview.klook_hotel_direct_url || ""
-  ).trim();
+  enrichPreviewKlookSlugs(preview);
+  let direct = buildKlookBrowseUrlFromPreview(preview);
+  if (!direct) {
+    direct = String(
+      preview.klook_hotel_direct_url_template || preview.klook_hotel_direct_url || ""
+    ).trim();
+    const aff = String(preview.klook_hotel_url_template || "").trim();
+    if (!direct && aff) direct = extractKlookHotelUrl(aff);
+    if (direct && isKlookListHotelUrl(direct)) direct = "";
+  }
   const aff = String(preview.klook_hotel_url_template || "").trim();
-  if (!direct && aff) direct = extractKlookHotelUrl(aff);
-  if (direct && isKlookListHotelUrl(direct)) direct = buildKlookBrowseUrlFromPreview(preview) || direct;
   if (direct && isKlookHotelUrl(direct) && !isKlookListHotelUrl(direct)) {
     preview.klook_hotel_direct_url_template = stripKlookPriceParams(direct);
     preview.klook_hotel_base_url = preview.klook_hotel_direct_url_template;
@@ -445,7 +466,8 @@ function renderManualKiwiKlookCard(preview) {
   return article;
 }
 
-function initLivePage() {
+async function initLivePage() {
+  await klookCityPagesReady;
   const raw = sessionStorage.getItem("partiamo_live_preview");
   if (!raw) {
     document.getElementById("error").textContent =
