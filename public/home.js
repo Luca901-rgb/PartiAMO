@@ -321,8 +321,40 @@ function repairPreviewKlookClient(preview) {
   return preview;
 }
 
+/** Imposta URL Klook su data-attribute (tp-em non può riscriverlo in /it/hotels/list/). */
+function setKlookOutboundLink(el, url) {
+  if (!el) return;
+  const u = String(url || "").trim();
+  if (!u || isKlookListHotelUrl(u) || /\/it\/hotels\/list\//i.test(u)) {
+    el.removeAttribute("data-klook-href");
+    el.removeAttribute("data-klook-direct");
+    el.href = "#";
+    return;
+  }
+  el.setAttribute("data-klook-direct", "1");
+  el.setAttribute("data-klook-href", u);
+  el.href = u;
+}
+
+document.addEventListener(
+  "click",
+  (e) => {
+    const el = e.target.closest("a[data-klook-direct][data-klook-href]");
+    if (!el) return;
+    const url = String(el.getAttribute("data-klook-href") || "").trim();
+    if (!url || isKlookListHotelUrl(url)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    const tab = window.open(url, "_blank", "noopener,noreferrer");
+    if (tab) tab.opener = null;
+  },
+  true
+);
+
 function wireManualKlookButton(btn, preview, getHotelBudget) {
   if (!btn) return;
+  btn.setAttribute("data-klook-direct", "1");
   btn.addEventListener("click", (e) => {
     const budget = getHotelBudget();
     if (budget <= 0) {
@@ -330,11 +362,11 @@ function wireManualKlookButton(btn, preview, getHotelBudget) {
       return;
     }
     const url = buildManualKlookHref(preview, budget);
-    if (!url || url === "#") {
+    if (!url) {
       e.preventDefault();
       return;
     }
-    btn.href = url;
+    setKlookOutboundLink(btn, url);
   });
 }
 
@@ -1150,10 +1182,10 @@ function renderManualKiwiKlookResults(preview, wasSurprise) {
     const klookUrl = buildManualKlookHref(preview, hotelBudget);
     const fallbackUrl = buildManualKlookHref(preview, hotelBudget, { taxesOnly: true });
     if (fallbackWrap && fallbackLink && fallbackUrl) {
-      fallbackLink.href = fallbackUrl;
+      setKlookOutboundLink(fallbackLink, fallbackUrl);
       fallbackWrap.hidden = false;
     }
-    klookBtn.href = klookUrl || "#";
+    setKlookOutboundLink(klookBtn, klookUrl);
     klookBtn.style.pointerEvents = klookUrl ? "auto" : "none";
     klookBtn.style.opacity = klookUrl ? "1" : "0.45";
     klookBtn.setAttribute("aria-disabled", klookUrl ? "false" : "true");

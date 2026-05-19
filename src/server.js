@@ -129,6 +129,41 @@ app.use(
   })
 );
 
+/** URL hotel Klook (pagina città en-GB, mai /it/hotels/list/). */
+app.get("/api/klook-hotel-url", (req, res) => {
+  try {
+    const {
+      buildKlookHotelSearchUrl,
+      applyKlookBudgetToUrl,
+      stayNightsBetweenIsoDates,
+    } = require("./klook-affiliate");
+    const destIata = String(req.query.destIata || req.query.iata || "").trim();
+    const checkIn = String(req.query.checkIn || req.query.check_in || "").slice(0, 10);
+    const checkOut = String(req.query.checkOut || req.query.check_out || "").slice(0, 10);
+    const adults = Math.max(1, Math.min(9, Number(req.query.adults || req.query.adult_num) || 2));
+    const budget = Math.max(0, Math.floor(Number(req.query.budget || req.query.maxPrice) || 0));
+    let url = buildKlookHotelSearchUrl({
+      destIata,
+      checkIn,
+      checkOut,
+      adults,
+      currency: "EUR",
+      maxTotalPrice: budget,
+    });
+    if (!url) {
+      return res.status(404).json({ ok: false, error: "Destinazione Klook non mappata" });
+    }
+    if (budget > 0) {
+      const nights = stayNightsBetweenIsoDates(checkIn, checkOut) || 1;
+      url = applyKlookBudgetToUrl(url, budget, nights);
+    }
+    res.json({ ok: true, url });
+  } catch (e) {
+    console.error("[klook-hotel-url]", e);
+    res.status(500).json({ ok: false, error: "URL Klook non disponibile" });
+  }
+});
+
 /** Richiesta usata dallo script Travelpayouts (tp-em): evita 404 in console. */
 app.get("/live-search", (_req, res) => {
   res.status(204).end();

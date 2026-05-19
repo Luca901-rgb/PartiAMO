@@ -776,7 +776,7 @@ function wrapTravelpayoutsAffiliateUrl(targetUrl) {
 
   if (!u) return "";
 
-  if (/klook\.com\/hotels/i.test(u) && !shouldWrapKlookAffiliate()) {
+  if (isKlookHotelUrl(u) && !shouldWrapKlookAffiliate()) {
     return u;
   }
 
