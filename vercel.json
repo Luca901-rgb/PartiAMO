@@ -9,6 +9,9 @@
         "public/**",
         "src/destinations-data.json",
         "src/klook-city-pages.json",
+        "src/passengers.js",
+        "src/locations.js",
+        "src/airports-data.json",
         "src/xotelo-location-keys.json",
         "src/xotelo-hotel-seeds.json"
       ]

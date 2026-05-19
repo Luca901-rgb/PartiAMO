@@ -1,15 +1,340 @@
 const AFFILIATE_AIRHELP_FALLBACK = "https://airhelp.tpk.lv/BDuyfeVr";
 const AFFILIATE_KIWI_FALLBACK = "https://kiwi.tpk.lv/UiOvgyTf";
+const FLIGHT_PRICE_STORAGE_KEY = "partiamo_manual_flight_price";
 
 function effectiveFlightUrl(flight, pkg) {
-  const u = String((pkg && pkg.kiwi_link) || (flight && flight.flightLink) || "").trim();
+  const u = String(
+    (pkg && (pkg.kiwi_flight_url || pkg.kiwi_link)) || (flight && flight.flightLink) || ""
+  ).trim();
   if (u) return u;
   return AFFILIATE_KIWI_FALLBACK;
 }
 
+function readStoredFlightPrice() {
+  const raw = sessionStorage.getItem(FLIGHT_PRICE_STORAGE_KEY);
+  const n = Math.round(Number(raw) || 0);
+  return n > 0 ? n : 0;
+}
+
+function storeFlightPrice(value) {
+  const n = Math.round(Number(value) || 0);
+  if (n > 0) sessionStorage.setItem(FLIGHT_PRICE_STORAGE_KEY, String(n));
+  else sessionStorage.removeItem(FLIGHT_PRICE_STORAGE_KEY);
+}
+
+function applyHotelBudgetToken(template, hotelBudget) {
+  const token = String(Math.max(0, Math.floor(Number(hotelBudget) || 0)));
+  return String(template || "").replace(/__HOTEL_BUDGET__/g, token);
+}
+
+function isKlookHotelUrl(urlString) {
+  return /klook\.com(?:\/[a-z]{2}(?:-[a-z]{2})?)?\/hotels\b/i.test(String(urlString || ""));
+}
+
+function isKlookHotelBrowseUrl(urlString) {
+  return /klook\.com(?:\/[a-z]{2}(?:-[a-z]{2})?)?\/hotels\/(list|city|searchresult|destination)\b/i.test(
+    String(urlString || "")
+  );
+}
+
+/** Estrae l’URL Klook da link diretti o da wrapper tp.media / c111.travelpayouts.com. */
+function extractKlookHotelUrl(url) {
+  const raw = String(url || "").trim();
+  if (!raw) return "";
+  if (isKlookHotelUrl(raw)) return raw;
+  try {
+    const u = new URL(raw);
+    const nested = u.searchParams.get("u") || u.searchParams.get("custom_url");
+    if (nested) {
+      const decoded = decodeURIComponent(nested);
+      if (isKlookHotelUrl(decoded)) return decoded;
+    }
+  } catch (_e) {
+    /* ignore */
+  }
+  return "";
+}
+
+const KLOOK_PRICE_QUERY_KEYS = [
+  "filter_selected",
+  "filter_price_high",
+  "filter_price_low",
+  "high_price",
+  "max_price",
+  "price_max",
+  "maxPrice",
+  "price_range",
+  "max_total_price",
+  "sort_selected",
+];
+
+function stayNightsForPreview(preview) {
+  const checkIn = String(preview?.requested_check_in || preview?.flight?.departDate || "").slice(0, 10);
+  const checkOut = String(preview?.requested_check_out || preview?.flight?.returnDate || "").slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(checkIn) && /^\d{4}-\d{2}-\d{2}$/.test(checkOut)) {
+    const diffMs = new Date(checkOut).getTime() - new Date(checkIn).getTime();
+    const n = Math.ceil(diffMs / (1000 * 3600 * 24));
+    return Math.max(1, Math.min(21, n || 1));
+  }
+  return Math.max(1, Math.floor(Number(preview?.stay_nights) || 1));
+}
+
+function stripKlookPriceParams(urlString) {
+  let u;
+  try {
+    u = new URL(String(urlString || "").trim());
+  } catch (_e) {
+    return String(urlString || "").trim();
+  }
+  if (!isKlookHotelUrl(u.href)) return u.toString();
+  for (const key of KLOOK_PRICE_QUERY_KEYS) u.searchParams.delete(key);
+  return u.toString();
+}
+
+/** taxes|1 = excludes · taxes|2 = includes (confermato screenshot London). */
+const KLOOK_TAXES_INCLUDED = "2";
+const MIN_KLOOK_MAX_PRICE_EUR = 40;
+
+function buildKlookFilterSelected(maxPerNightEuro, { taxesOnly = false } = {}) {
+  if (taxesOnly) return `taxes|${KLOOK_TAXES_INCLUDED}`;
+  const max = Math.max(1, Math.floor(Number(maxPerNightEuro) || 0));
+  return `taxes|${KLOOK_TAXES_INCLUDED},price|0-${max}`;
+}
+
+function isKlookKeywordSearchUrl(urlString) {
+  try {
+    const u = new URL(String(urlString || "").trim());
+    const path = u.pathname.replace(/^\/(en|it|fr|de|es|zh|ja|ko)(?=\/)/i, "") || u.pathname;
+    if (!/\/hotels\/searchresult/i.test(path)) return false;
+    if (u.searchParams.get("stype") === "keyword") return true;
+    return !u.searchParams.get("city_id");
+  } catch (_e) {
+    return false;
+  }
+}
+
+function cityLabelFromKlookCityPath(pathname) {
+  const slug = String(pathname || "")
+    .split("/")
+    .filter(Boolean)
+    .pop();
+  const m = String(slug || "").match(/^\d+-(.+)-hotels$/i);
+  if (!m) return "";
+  return m[1]
+    .split("-")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+function tryKlookListUrlFromSearchResult(u, maxTotalPrice) {
+  const city =
+    u.searchParams.get("override") ||
+    u.searchParams.get("title") ||
+    u.searchParams.get("svalue") ||
+    cityLabelFromKlookCityPath(u.pathname) ||
+    "";
+  const checkIn = u.searchParams.get("check_in") || u.searchParams.get("checkIn");
+  const checkOut = u.searchParams.get("check_out") || u.searchParams.get("checkOut");
+  if (!city || !/^\d{4}-\d{2}-\d{2}$/.test(checkIn) || !/^\d{4}-\d{2}-\d{2}$/.test(checkOut)) return "";
+  const list = new URL("https://www.klook.com/it/hotels/list/");
+  list.searchParams.set("city", city);
+  list.searchParams.set("checkIn", checkIn);
+  list.searchParams.set("checkOut", checkOut);
+  list.searchParams.set("adult", String(Math.max(1, parseInt(u.searchParams.get("adult_num") || "1", 10))));
+  const total = Math.max(0, Math.floor(Number(maxTotalPrice) || 0));
+  if (total >= MIN_KLOOK_MAX_PRICE_EUR) list.searchParams.set("maxPrice", String(total));
+  return list.toString();
+}
+
+function applyKlookBudgetToUrl(urlString, hotelBudgetTotalEuro, stayNights, opts = {}) {
+  const raw = stripKlookPriceParams(String(urlString || "").trim());
+  if (!raw || !/klook\.com(?:\/[a-z]{2}(?:-[a-z]{2})?)?\/hotels\b/i.test(raw)) return raw;
+  let taxesOnly = opts.taxesOnly === true;
+  const perNightFilter = taxesOnly ? 0 : klookFilterPerNightCap(hotelBudgetTotalEuro, stayNights);
+  const total = Math.max(0, Math.floor(Number(hotelBudgetTotalEuro) || 0));
+  let u;
+  try {
+    u = new URL(raw);
+  } catch (_e) {
+    return raw;
+  }
+  const pathForKlook = u.pathname.replace(/^\/(en|it|fr|de|es|zh|ja|ko)(?=\/)/i, "") || u.pathname;
+  if (/\/hotels\/(city|destination)\//i.test(pathForKlook)) {
+    u.searchParams.delete("max_total_price");
+    if (total >= MIN_KLOOK_MAX_PRICE_EUR) u.searchParams.set("max_total_price", String(total));
+    return u.toString();
+  }
+  if (/\/hotels\/list\//i.test(pathForKlook)) {
+    u.searchParams.delete("maxPrice");
+    if (total >= MIN_KLOOK_MAX_PRICE_EUR) u.searchParams.set("maxPrice", String(total));
+    return u.toString();
+  }
+  if (isKlookKeywordSearchUrl(u.toString()) && total < MIN_KLOOK_MAX_PRICE_EUR) {
+    taxesOnly = true;
+  }
+  for (const key of KLOOK_PRICE_QUERY_KEYS) u.searchParams.delete(key);
+  u.searchParams.set("sort_selected", "hotel_score");
+  if (taxesOnly) {
+    u.searchParams.set("filter_selected", buildKlookFilterSelected(0, { taxesOnly: true }));
+    return u.toString();
+  }
+  u.searchParams.set("filter_selected", buildKlookFilterSelected(perNightFilter));
+  u.searchParams.set("filter_price_high", String(perNightFilter));
+  u.searchParams.set("filter_price_low", "0");
+  u.searchParams.set("high_price", String(perNightFilter));
+  u.searchParams.set("price_range", `0,${perNightFilter}`);
+  u.searchParams.set("max_total_price", String(total));
+  return u.toString();
+}
+
+function klookPerNightBudget(total, nights) {
+  const n = Math.max(1, Math.floor(Number(nights) || 1));
+  const t = Math.max(0, Math.floor(Number(total) || 0));
+  return t > 0 ? Math.max(1, Math.round(t / n)) : 0;
+}
+
+function klookFilterPerNightCap(total, nights) {
+  const strict = klookPerNightBudget(total, nights);
+  if (strict <= 0) return 0;
+  return Math.max(strict + 12, Math.ceil(strict * 1.25));
+}
+
+function appendKlookAffiliateTracking(urlString) {
+  return String(urlString || "").trim();
+}
+
+function isKlookListHotelUrl(urlString) {
+  try {
+    const u = new URL(String(urlString || "").trim());
+    const path = u.pathname.replace(/^\/(en|it|fr|de|es|zh|ja|ko)(?=\/)/i, "") || u.pathname;
+    return /\/hotels\/list\//i.test(path);
+  } catch (_e) {
+    return false;
+  }
+}
+
+function buildKlookBrowseUrlFromPreview(preview) {
+  const f = preview?.flight || {};
+  const checkIn = String(preview?.requested_check_in || f.departDate || "").slice(0, 10);
+  const checkOut = String(preview?.requested_check_out || f.returnDate || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(checkIn) || !/^\d{4}-\d{2}-\d{2}$/.test(checkOut)) return "";
+  const adults = Math.max(
+    1,
+    Math.min(9, Number(String(preview?.passengers_count ?? preview?.persone ?? "1").replace(/\D/g, "")) || 1)
+  );
+  const citySlug = String(preview?.klook_city_page_slug || "").trim();
+  if (citySlug) {
+    const u = new URL(`https://www.klook.com/it/hotels/city/${citySlug}/`);
+    u.searchParams.set("check_in", checkIn);
+    u.searchParams.set("check_out", checkOut);
+    u.searchParams.set("adult_num", String(adults));
+    return u.toString();
+  }
+  const destSlug = String(preview?.klook_destination_page_slug || "").trim();
+  if (destSlug) {
+    const u = new URL(`https://www.klook.com/it/destination/${destSlug}/`);
+    u.searchParams.set("check_in", checkIn);
+    u.searchParams.set("check_out", checkOut);
+    u.searchParams.set("adult_num", String(adults));
+    return u.toString();
+  }
+  return "";
+}
+
+function klookBaseFromPreview(preview) {
+  for (const raw of [
+    preview?.klook_hotel_direct_url_template,
+    preview?.klook_hotel_base_url,
+    preview?.klook_hotel_url_template,
+  ]) {
+    const extracted = extractKlookHotelUrl(raw);
+    if (extracted && isKlookHotelBrowseUrl(extracted)) {
+      return stripKlookPriceParams(extracted);
+    }
+  }
+  return "";
+}
+
+function buildManualKlookHref(preview, hotelBudget, opts = {}) {
+  const total = Math.max(0, Math.floor(Number(hotelBudget) || 0));
+  if (total <= 0) return "";
+  let base = klookBaseFromPreview(preview);
+  if (!base || isKlookListHotelUrl(base)) base = buildKlookBrowseUrlFromPreview(preview);
+  if (!base) return "";
+  const klookUrl = applyKlookBudgetToUrl(base, total, stayNightsForPreview(preview), opts);
+  return appendKlookAffiliateTracking(klookUrl);
+}
+
+function klookBudgetHintText(hotelBudget, nights) {
+  const n = Math.max(1, Math.floor(Number(nights) || 1));
+  const total = Math.max(0, Math.floor(Number(hotelBudget) || 0));
+  const perNight = klookPerNightBudget(total, n);
+  if (total <= 0) return "Inserisci il prezzo volo per calcolare il budget hotel.";
+  return `Ti restano €${total} per l'hotel (≈ €${perNight}/notte × ${n} notti).`;
+}
+
+function klookFilterDetailText(strictPerNight, filterCapPerNight) {
+  const strict = Math.max(1, Math.floor(Number(strictPerNight) || 0));
+  const cap = Math.max(strict, Math.floor(Number(filterCapPerNight) || 0));
+  if (cap > strict) {
+    return `Su Klook: prezzi con tasse incluse, filtro fino a ~€${cap}/notte (budget tuo ≈ €${strict}/notte). Se ancora non vedi hotel, usa il link sotto.`;
+  }
+  return `Su Klook: prezzi con tasse incluse, filtro fino a €${cap}/notte.`;
+}
+
+function repairPreviewKlookClient(preview) {
+  if (!preview) return preview;
+  let direct = String(
+    preview.klook_hotel_direct_url_template || preview.klook_hotel_direct_url || ""
+  ).trim();
+  const aff = String(preview.klook_hotel_url_template || "").trim();
+  if (!direct && aff) direct = extractKlookHotelUrl(aff);
+  if (direct && isKlookListHotelUrl(direct)) direct = buildKlookBrowseUrlFromPreview(preview) || direct;
+  if (direct && isKlookHotelUrl(direct) && !isKlookListHotelUrl(direct)) {
+    preview.klook_hotel_direct_url_template = stripKlookPriceParams(direct);
+    preview.klook_hotel_base_url = preview.klook_hotel_direct_url_template;
+    if (/tp\.media\/r/i.test(aff)) delete preview.klook_hotel_url_template;
+  }
+  return preview;
+}
+
+function wireManualKlookButton(btn, preview, getHotelBudget) {
+  if (!btn) return;
+  btn.addEventListener("click", (e) => {
+    const budget = getHotelBudget();
+    if (budget <= 0) {
+      e.preventDefault();
+      return;
+    }
+    const url = buildManualKlookHref(preview, budget);
+    if (!url || url === "#") {
+      e.preventDefault();
+      return;
+    }
+    btn.href = url;
+  });
+}
+
 function passengerCountFromPreview(preview) {
+  const p = preview?.passengers;
+  if (p && Number.isFinite(Number(p.adults))) {
+    return Math.max(1, (Number(p.adults) || 0) + (Number(p.children) || 0) + (Number(p.infants) || 0));
+  }
   const raw = String(preview?.passengers_count ?? preview?.persone ?? "2").replace(/\D/g, "");
   return Math.max(1, Math.min(9, Number(raw) || 1));
+}
+
+function passengerSummaryFromPreview(preview) {
+  if (preview?.passengers_summary) return String(preview.passengers_summary);
+  const p = preview?.passengers;
+  if (p && Number.isFinite(Number(p.adults))) {
+    const parts = [`${p.adults} adult${p.adults === 1 ? "o" : "i"}`];
+    if (p.children > 0) parts.push(`${p.children} bambin${p.children === 1 ? "o" : "i"}`);
+    if (p.infants > 0) parts.push(`${p.infants} neonat${p.infants === 1 ? "o" : "i"}`);
+    return parts.join(", ");
+  }
+  const n = passengerCountFromPreview(preview);
+  return `${n} persona${n === 1 ? "" : "e"}`;
 }
 
 function flightPerPersonEuro(preview, totalEuro) {
@@ -25,6 +350,20 @@ function flightPriceSubline(preview, totalEuro) {
   const per = flightPerPersonEuro(preview, totalEuro);
   if (pax > 1 && per > 0) return `€${per} × ${pax} adulti`;
   return "";
+}
+
+function kiwiBaggageHintText(preview) {
+  if (Number(preview?.destinazione_sorpresa) === 1) {
+    return "Su Kiwi apriamo la ricerca con bagaglio a mano incluso (senza stiva). Puoi aggiungere stiva o «solo voli diretti» su Kiwi se ti servono.";
+  }
+  const bag = String(preview?.bagaglio || "Solo cabina").toLowerCase();
+  if (/mano e stiva|entrambi/.test(bag)) {
+    return "Su Kiwi apriamo la ricerca con prezzi che includono bagaglio a mano e in stiva (controlla i filtri Bagagli).";
+  }
+  if (/stiva/.test(bag)) {
+    return "Su Kiwi apriamo la ricerca con prezzi che includono il bagaglio in stiva (filtro Bagagli da stiva = 1).";
+  }
+  return "Su Kiwi apriamo la ricerca con prezzi per bagaglio a mano incluso (senza stiva).";
 }
 
 function flightIsIndicative(preview, flight) {
@@ -47,17 +386,21 @@ function hotelButtonLabel(h) {
   return total > 0 ? `Prenota hotel · €${total}` : "Prenota hotel";
 }
 
-function klookHotelHref(preview) {
+function primaryHotelHref(preview) {
   const href = String(
-    preview?.klook_hotel_direct_url ||
-      preview?.hotels?.[0]?.directBookingLink ||
-      preview?.klook_hotel_url ||
-      preview?.hotels?.[0]?.bookingLink ||
+    preview?.hotel_primary_url ||
       preview?.aviasales_hotel_url ||
+      preview?.hotels?.[0]?.directBookingLink ||
+      preview?.hotels?.[0]?.bookingLink ||
       preview?.flight?.hotelLink ||
+      preview?.klook_hotel_direct_url ||
+      preview?.klook_hotel_url ||
       ""
   ).trim();
-  return normalizeKlookHotelHref(href, preview);
+  const klookDirect = extractKlookHotelUrl(href);
+  if (klookDirect) return normalizeKlookHotelHref(klookDirect, preview);
+  if (href && !/tp\.media\/r/i.test(href)) return normalizeKlookHotelHref(href, preview);
+  return "";
 }
 
 function normalizeKlookHotelHref(href, preview) {
@@ -68,8 +411,13 @@ function normalizeKlookHotelHref(href, preview) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(checkIn) || !/^\d{4}-\d{2}-\d{2}$/.test(checkOut)) return url;
   try {
     const u = new URL(url);
-    u.searchParams.set("check_in", checkIn);
-    u.searchParams.set("check_out", checkOut);
+    if (/\/hotels\/list\//i.test(u.pathname)) {
+      u.searchParams.set("checkIn", checkIn);
+      u.searchParams.set("checkOut", checkOut);
+    } else {
+      u.searchParams.set("check_in", checkIn);
+      u.searchParams.set("check_out", checkOut);
+    }
     return u.toString();
   } catch (_e) {
     return url;
@@ -111,8 +459,6 @@ let partiamoDestinations = [];
 /** @type {Map<string, string>} IATA → label (ultima ricerca partenza) */
 let lastFromAirportHits = new Map();
 let lastToAirportHits = new Map();
-let fromAirportFetchTimer = null;
-let toAirportFetchTimer = null;
 
 function foldAscii(s) {
   return String(s || "")
@@ -140,107 +486,160 @@ function toTitleCaseWords(s) {
     .join(" ");
 }
 
-async function fetchAirports(query, hitsMap) {
+async function fetchLocations(query, scope, hitsMap) {
   const q = String(query || "").trim();
-  const url = `/api/airports?q=${encodeURIComponent(q)}&limit=12`;
+  const scopeNorm = String(scope || "from").toLowerCase();
+  const limit = !q ? (scopeNorm === "to" ? 160 : 120) : 24;
+  const url = `/api/locations?q=${encodeURIComponent(q)}&limit=${limit}&scope=${encodeURIComponent(scopeNorm)}`;
   const r = await fetch(url);
   const j = await r.json();
-  if (!j.ok || !Array.isArray(j.airports)) return [];
+  if (!j.ok || !Array.isArray(j.locations)) return [];
   const map = hitsMap || lastFromAirportHits;
-  for (const a of j.airports) {
-    if (a.iata && a.label) map.set(String(a.iata).toUpperCase(), a.label);
+  for (const loc of j.locations) {
+    if (loc.iata && loc.title) map.set(String(loc.iata).toUpperCase(), loc.title);
   }
-  return j.airports;
+  return j.locations;
 }
 
-async function fetchFromAirports(query) {
-  return fetchAirports(query, lastFromAirportHits);
+function locationPickerIcon(type) {
+  if (type === "city") return "🏙️";
+  if (type === "destination") return "✨";
+  return "✈️";
 }
 
-async function fetchToAirports(query) {
-  return fetchAirports(query, lastToAirportHits);
+function locationSectionLabel(type) {
+  if (type === "city") return "Città";
+  if (type === "destination") return "Destinazioni Partiamo";
+  return "Aeroporti";
 }
 
-function initFromAutocomplete() {
-  const input = document.getElementById("from");
-  const list = document.getElementById("from-suggestions");
+function initKiwiLocationPicker({ input, list, scope, hitsMap, disabled }) {
   if (!input || !list) return;
+  let fetchTimer = null;
+  let activeIndex = -1;
+  let currentItems = [];
 
   function setExpanded(open) {
     input.setAttribute("aria-expanded", open ? "true" : "false");
   }
 
-  function renderList(items) {
-    list.innerHTML = "";
-    for (const d of items) {
-      const li = document.createElement("li");
-      li.setAttribute("role", "option");
-      li.className = "autocomplete-suggestion";
-      li.dataset.label = d.label;
-      li.dataset.iata = d.iata;
-      const spanL = document.createElement("span");
-      spanL.className = "autocomplete-label";
-      spanL.textContent = d.label;
-      const spanI = document.createElement("span");
-      spanI.className = "autocomplete-iata";
-      spanI.textContent = d.iata;
-      if (d.country) {
-        const spanC = document.createElement("span");
-        spanC.className = "autocomplete-country";
-        spanC.textContent = d.country;
-        li.appendChild(spanL);
-        li.appendChild(spanC);
-      } else {
-        li.appendChild(spanL);
-      }
-      li.appendChild(spanI);
-      list.appendChild(li);
-    }
-    const show = items.length > 0;
-    list.hidden = !show;
-    setExpanded(show);
-  }
-
-  function scheduleFetch() {
-    clearTimeout(fromAirportFetchTimer);
-    fromAirportFetchTimer = setTimeout(async () => {
-      try {
-        const items = await fetchFromAirports(input.value);
-        renderList(items);
-      } catch (_e) {
-        list.hidden = true;
-        setExpanded(false);
-      }
-    }, 180);
-  }
-
-  function openList() {
-    scheduleFetch();
-  }
-
-  input.addEventListener("focus", openList);
-  input.addEventListener("input", () => {
-    delete input.dataset.iata;
-    delete input.dataset.label;
-    openList();
-  });
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      list.hidden = true;
-      setExpanded(false);
-    }
-  });
-
-  list.addEventListener("mousedown", (e) => {
-    e.preventDefault();
-    const li = e.target.closest("li.autocomplete-suggestion");
+  function pickItem(li) {
     if (!li) return;
     input.value = li.dataset.label || "";
     if (li.dataset.iata) input.dataset.iata = li.dataset.iata;
     if (li.dataset.label) input.dataset.label = li.dataset.label;
     list.hidden = true;
     setExpanded(false);
+    activeIndex = -1;
     input.focus();
+  }
+
+  function setActive(index) {
+    const options = list.querySelectorAll("li.kiwi-loc-option");
+    options.forEach((el, i) => el.classList.toggle("is-active", i === index));
+    activeIndex = index;
+    if (index >= 0 && options[index]) {
+      options[index].scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  function renderList(locations) {
+    list.innerHTML = "";
+    currentItems = locations;
+    activeIndex = -1;
+    let lastType = "";
+    for (const loc of locations) {
+      if (loc.type !== lastType) {
+        lastType = loc.type;
+        const head = document.createElement("li");
+        head.className = "kiwi-loc-section";
+        head.setAttribute("role", "presentation");
+        head.textContent = locationSectionLabel(loc.type);
+        list.appendChild(head);
+      }
+      const li = document.createElement("li");
+      li.setAttribute("role", "option");
+      li.className = "kiwi-loc-option";
+      li.dataset.label = loc.title;
+      li.dataset.iata = loc.iata || loc.code || "";
+      li.dataset.type = loc.type || "airport";
+
+      const icon = document.createElement("span");
+      icon.className = "kiwi-loc-icon";
+      icon.setAttribute("aria-hidden", "true");
+      icon.textContent = locationPickerIcon(loc.type);
+
+      const body = document.createElement("div");
+      body.className = "kiwi-loc-body";
+      const title = document.createElement("span");
+      title.className = "kiwi-loc-title";
+      title.textContent = loc.title;
+      const sub = document.createElement("span");
+      sub.className = "kiwi-loc-sub";
+      sub.textContent = loc.subtitle || "";
+      body.appendChild(title);
+      if (loc.subtitle) body.appendChild(sub);
+
+      const code = document.createElement("span");
+      code.className = "kiwi-loc-code";
+      code.textContent = loc.code || loc.iata || "";
+
+      li.appendChild(icon);
+      li.appendChild(body);
+      li.appendChild(code);
+      list.appendChild(li);
+    }
+    const show = locations.length > 0 && !(typeof disabled === "function" ? disabled() : disabled);
+    list.hidden = !show;
+    setExpanded(show);
+  }
+
+  function scheduleFetch() {
+    if (typeof disabled === "function" ? disabled() : disabled) {
+      list.hidden = true;
+      setExpanded(false);
+      return;
+    }
+    clearTimeout(fetchTimer);
+    fetchTimer = setTimeout(async () => {
+      try {
+        const items = await fetchLocations(input.value, scope, hitsMap);
+        renderList(items);
+      } catch (_e) {
+        list.hidden = true;
+        setExpanded(false);
+      }
+    }, 160);
+  }
+
+  input.addEventListener("focus", scheduleFetch);
+  input.addEventListener("input", () => {
+    delete input.dataset.iata;
+    delete input.dataset.label;
+    scheduleFetch();
+  });
+  input.addEventListener("keydown", (e) => {
+    const options = list.querySelectorAll("li.kiwi-loc-option");
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (list.hidden) scheduleFetch();
+      else setActive(Math.min(activeIndex + 1, options.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive(Math.max(activeIndex - 1, 0));
+    } else if (e.key === "Enter" && activeIndex >= 0 && options[activeIndex]) {
+      e.preventDefault();
+      pickItem(options[activeIndex]);
+    } else if (e.key === "Escape") {
+      list.hidden = true;
+      setExpanded(false);
+      activeIndex = -1;
+    }
+  });
+
+  list.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    pickItem(e.target.closest("li.kiwi-loc-option"));
   });
 
   document.addEventListener("click", (e) => {
@@ -248,6 +647,15 @@ function initFromAutocomplete() {
       list.hidden = true;
       setExpanded(false);
     }
+  });
+}
+
+function initFromAutocomplete() {
+  initKiwiLocationPicker({
+    input: document.getElementById("from"),
+    list: document.getElementById("from-suggestions"),
+    scope: "from",
+    hitsMap: lastFromAirportHits,
   });
 }
 
@@ -319,116 +727,35 @@ function filterDestinations(query) {
 }
 
 function initDestinationAutocomplete() {
-  const input = document.getElementById("to");
-  const list = document.getElementById("to-suggestions");
-  if (!input || !list) return;
-
-  function setExpanded(open) {
-    input.setAttribute("aria-expanded", open ? "true" : "false");
-  }
-
-  function renderList(items) {
-    list.innerHTML = "";
-    for (const d of items) {
-      const li = document.createElement("li");
-      li.setAttribute("role", "option");
-      li.className = "autocomplete-suggestion";
-      li.dataset.label = d.label;
-      li.dataset.iata = d.iata;
-      const spanL = document.createElement("span");
-      spanL.className = "autocomplete-label";
-      spanL.textContent = d.label;
-      const spanI = document.createElement("span");
-      spanI.className = "autocomplete-iata";
-      spanI.textContent = d.iata;
-      if (d.country) {
-        const spanC = document.createElement("span");
-        spanC.className = "autocomplete-country";
-        spanC.textContent = d.country;
-        li.appendChild(spanL);
-        li.appendChild(spanC);
-      } else {
-        li.appendChild(spanL);
-      }
-      li.appendChild(spanI);
-      list.appendChild(li);
-    }
-    const show = items.length > 0 && !surpriseOn;
-    list.hidden = !show;
-    setExpanded(show);
-  }
-
-  function scheduleFetch() {
-    clearTimeout(toAirportFetchTimer);
-    toAirportFetchTimer = setTimeout(async () => {
-      try {
-        const q = input.value.trim();
-        const airports = await fetchToAirports(q);
-        const local = filterDestinations(q).map((d) => ({
-          iata: d.iata,
-          label: d.label,
-          country: "",
-        }));
-        const seen = new Set();
-        const merged = [];
-        for (const item of [...airports, ...local]) {
-          const code = String(item.iata || "").toUpperCase();
-          if (!code || seen.has(code)) continue;
-          seen.add(code);
-          merged.push(item);
-        }
-        renderList(merged.slice(0, 12));
-      } catch (_e) {
-        list.hidden = true;
-        setExpanded(false);
-      }
-    }, 180);
-  }
-
-  function openList() {
-    if (surpriseOn) {
-      list.hidden = true;
-      setExpanded(false);
-      return;
-    }
-    scheduleFetch();
-  }
-
-  input.addEventListener("focus", openList);
-  input.addEventListener("input", () => {
-    delete input.dataset.iata;
-    delete input.dataset.label;
-    openList();
+  initKiwiLocationPicker({
+    input: document.getElementById("to"),
+    list: document.getElementById("to-suggestions"),
+    scope: "to",
+    hitsMap: lastToAirportHits,
+    disabled: () => surpriseOn,
   });
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      list.hidden = true;
-      setExpanded(false);
-    }
-  });
+}
 
-  list.addEventListener("mousedown", (e) => {
-    e.preventDefault();
-    const li = e.target.closest("li.autocomplete-suggestion");
-    if (!li) return;
-    input.value = li.dataset.label || "";
-    if (li.dataset.iata) input.dataset.iata = li.dataset.iata;
-    if (li.dataset.label) input.dataset.label = li.dataset.label;
-    list.hidden = true;
-    setExpanded(false);
-    input.focus();
-  });
-
-  document.addEventListener("click", (e) => {
-    if (!e.target.closest(".field--autocomplete")) {
-      list.hidden = true;
-      setExpanded(false);
-    }
-  });
+function wirePassengerControls() {
+  const adultsEl = document.getElementById("passengers-adults");
+  const infantsEl = document.getElementById("passengers-infants");
+  if (!adultsEl || !infantsEl) return;
+  const syncInfants = () => {
+    const max = Math.max(1, parseInt(adultsEl.value, 10) || 1);
+    const cur = parseInt(infantsEl.value, 10) || 0;
+    infantsEl.querySelectorAll("option").forEach((opt) => {
+      const v = parseInt(opt.value, 10);
+      opt.disabled = v > max;
+    });
+    if (cur > max) infantsEl.value = String(max);
+  };
+  adultsEl.addEventListener("change", syncInfants);
+  syncInfants();
 }
 
 function bootHome() {
   initDates();
+  wirePassengerControls();
   const dh = document.getElementById("dest-type-hint");
   if (dh) dh.style.display = "none";
   initFromAutocomplete();
@@ -507,8 +834,11 @@ function buildLivePayload() {
   const budget = parseInt(document.getElementById("budget").value, 10) || 500;
   const dateFrom = document.getElementById("date-from").value;
   const dateTo = document.getElementById("date-to").value;
-  const paxIdx = document.getElementById("passengers").selectedIndex + 1;
-  const persone = paxIdx >= 4 ? "4+" : String(paxIdx);
+  let adults = Math.max(1, Math.min(6, parseInt(document.getElementById("passengers-adults")?.value, 10) || 2));
+  let children = Math.max(0, Math.min(4, parseInt(document.getElementById("passengers-children")?.value, 10) || 0));
+  let infants = Math.max(0, Math.min(2, parseInt(document.getElementById("passengers-infants")?.value, 10) || 0));
+  if (infants > adults) infants = adults;
+  const persone = String(adults);
 
   const durata = nightsBetween(dateFrom, dateTo);
 
@@ -516,6 +846,9 @@ function buildLivePayload() {
     aeroporto_partenza: mapFromToAirport(fromText),
     budget,
     persone,
+    adults,
+    children,
+    infants,
     durata,
     date_from: dateFrom,
     date_to: dateTo,
@@ -531,7 +864,7 @@ function buildLivePayload() {
     tipo_pasto: "Solo pernotto",
     tipo_camera: "Doppia",
     tipo_struttura: "Entrambe",
-    bagaglio: "Solo cabina",
+    bagaglio: document.getElementById("bagaglio")?.value || "Solo cabina",
     solo_voli_diretti: document.getElementById("solo-voli-diretti")?.checked ? "1" : "0",
   };
 }
@@ -618,9 +951,10 @@ async function doSearch() {
     btn.disabled = false;
 
     if (result.preview) {
-      lastPreview = result.preview;
-      sessionStorage.setItem("partiamo_live_preview", JSON.stringify(result.preview));
-      renderResultsFromApi(result.preview, insurance, surpriseOn);
+      const preview = repairPreviewKlookClient(result.preview);
+      lastPreview = preview;
+      sessionStorage.setItem("partiamo_live_preview", JSON.stringify(preview));
+      renderResultsFromApi(preview, insurance, surpriseOn);
       return;
     }
     if (!response.ok || !result.ok) {
@@ -680,9 +1014,14 @@ function hotelReviewBlock(h) {
 }
 
 function renderResultsFromApi(preview, insurance, wasSurprise) {
+  if (preview.card_mode === "manual_kiwi_klook") {
+    renderManualKiwiKlookResults(preview, wasSurprise);
+    return;
+  }
   if (
     preview.card_mode === "quoted_package" ||
     preview.card_mode === "klook_single" ||
+    preview.card_mode === "hotel_search" ||
     preview.prices_verified ||
     preview.klook_hotel_url ||
     preview.hotel_stay_quota != null
@@ -691,6 +1030,126 @@ function renderResultsFromApi(preview, insurance, wasSurprise) {
     return;
   }
   renderLegacyPackageResults(preview, insurance, wasSurprise);
+}
+
+function renderManualKiwiKlookResults(preview, wasSurprise) {
+  const results = document.getElementById("results");
+  const f = preview.flight || {};
+  const budgetNum = Math.max(0, Math.round(Number(preview.budget) || 0));
+  const paxSummary = escHtml(passengerSummaryFromPreview(preview));
+  const fromLabel = escHtml(preview.partenza || f.from || "");
+  const destReal = f.destination || preview.destination_city || preview.surprise_destination?.label || "";
+  const destLabel = escHtml(wasSurprise ? "?" : destReal);
+  const dateFrom = escHtml(preview.requested_check_in || f.departDate || "");
+  const dateTo = escHtml(preview.requested_check_out || f.returnDate || "");
+  const kiwiHref = escHtml(preview.kiwi_flight_url || effectiveFlightUrl(f));
+  const storedPrice = readStoredFlightPrice();
+  const stayNights = stayNightsForPreview(preview);
+
+  const html = `<div style="max-width:640px;margin:0 auto;padding:0 0 3rem;">
+    ${wasSurprise ? `<div class="surprise-card" id="surprise-card"><div class="surprise-icon">🎲</div><h3>Destinazione a sorpresa</h3><p style="margin:0.5rem 0 0;font-size:0.9rem;opacity:0.9">Meta nel mondo scelta in base alla tua partenza e al budget — ogni ricerca può essere un continente diverso.</p><button type="button" class="reveal-btn" id="reveal-dest-btn">✨ Rivela la meta</button></div>` : ""}
+    <div class="results-label">La tua ricerca</div>
+    <article class="package-card package-card--single package-card--klook">
+      <div class="package-card__top">
+        <span class="package-card__badge">Volo + hotel guidato</span>
+        <div class="package-card__total">
+          <span class="package-card__total-label">✈️ ${fromLabel} → ${destLabel}</span>
+          <strong class="package-card__total-eur">💰 Budget totale: €${budgetNum}</strong>
+          <span class="package-card__total-sub">📅 ${dateFrom} → ${dateTo} · 👥 ${paxSummary}</span>
+        </div>
+      </div>
+
+      <p class="klook-microcopy">Prima scegli il volo su Kiwi. ${escHtml(kiwiBaggageHintText(preview))} Poi inserisci qui il prezzo totale che vedi (coerente con i bagagli scelti).</p>
+
+      <div class="package-card__actions package-card__actions--stacked">
+        <a href="${kiwiHref}" target="_blank" rel="noopener noreferrer sponsored" class="package-btn package-btn--kiwi">Cerca volo su Kiwi</a>
+      </div>
+
+      <div class="klook-budget-box" style="margin-top:1rem">
+        <label for="manual-flight-price" class="klook-budget-box__title">Hai trovato il volo? Inserisci il prezzo totale</label>
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.5rem">
+          <span style="font-weight:800">€</span>
+          <input id="manual-flight-price" type="number" min="0" step="1" inputmode="decimal" placeholder="es. 120" value="${storedPrice > 0 ? storedPrice : ""}" style="width:100%;padding:0.85rem 1rem;border:1px solid #dbe3ef;border-radius:14px;font-size:1rem" />
+        </div>
+        <p id="manual-hotel-budget" class="klook-budget-box__sub" style="margin-top:0.75rem">Inserisci il prezzo volo per calcolare il budget hotel.</p>
+        <p id="klook-filter-detail" class="klook-budget-box__sub" hidden style="margin-top:0.5rem;font-size:0.88rem;line-height:1.45;color:#4a5568"></p>
+        <p id="klook-fallback-wrap" hidden style="margin-top:0.5rem;font-size:0.88rem"><a id="klook-fallback-link" href="#" target="_blank" rel="noopener noreferrer sponsored">Nessun hotel nel budget? Apri Klook con tasse incluse, senza limite di prezzo</a></p>
+      </div>
+
+      <div class="package-card__actions package-card__actions--stacked">
+        <a id="manual-klook-btn" href="#" target="_blank" rel="noopener noreferrer sponsored" class="package-btn package-btn--klook" aria-disabled="true" style="pointer-events:none;opacity:0.45">Cerca hotel su Klook</a>
+      </div>
+      <p class="package-card__fineprint">Su Klook apriamo prezzi con tasse incluse e il budget a notte calcolato da Partiamo. Se Klook chiede una verifica di sicurezza, completa il controllo nel browser (non usare anteprima integrata) oppure copia il link e incollalo in Chrome/Safari.</p>
+    </article>
+    <p style="text-align:center;margin-top:1.25rem"><a href="/offerta-live" class="prenota-btn" style="display:inline-block;text-decoration:none">Apri pagina risultati →</a></p>
+  </div>`;
+
+  results.innerHTML = html;
+  results.classList.add("show");
+  results.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  const input = document.getElementById("manual-flight-price");
+  const output = document.getElementById("manual-hotel-budget");
+  const filterDetail = document.getElementById("klook-filter-detail");
+  const fallbackWrap = document.getElementById("klook-fallback-wrap");
+  const fallbackLink = document.getElementById("klook-fallback-link");
+  const klookBtn = document.getElementById("manual-klook-btn");
+  const update = () => {
+    const flightPrice = Math.max(0, Math.round(Number(input.value) || 0));
+    storeFlightPrice(flightPrice);
+    const hotelBudget = Math.floor(budgetNum - flightPrice);
+    const perNight = klookPerNightBudget(hotelBudget, stayNights);
+    const filterCap = klookFilterPerNightCap(hotelBudget, stayNights);
+    if (filterDetail) filterDetail.hidden = true;
+    if (fallbackWrap) fallbackWrap.hidden = true;
+    if (flightPrice <= 0) {
+      output.textContent = klookBudgetHintText(0, stayNights);
+      klookBtn.href = "#";
+      klookBtn.style.pointerEvents = "none";
+      klookBtn.style.opacity = "0.45";
+      klookBtn.setAttribute("aria-disabled", "true");
+      return;
+    }
+    if (hotelBudget <= 0) {
+      output.textContent = `Il volo costa €${flightPrice}: non resta budget per l'hotel.`;
+      klookBtn.href = "#";
+      klookBtn.style.pointerEvents = "none";
+      klookBtn.style.opacity = "0.45";
+      klookBtn.setAttribute("aria-disabled", "true");
+      return;
+    }
+    output.textContent = klookBudgetHintText(hotelBudget, stayNights);
+    if (filterDetail && perNight > 0) {
+      filterDetail.textContent = klookFilterDetailText(perNight, filterCap);
+      filterDetail.hidden = false;
+    }
+    const klookUrl = buildManualKlookHref(preview, hotelBudget);
+    const fallbackUrl = buildManualKlookHref(preview, hotelBudget, { taxesOnly: true });
+    if (fallbackWrap && fallbackLink && fallbackUrl) {
+      fallbackLink.href = fallbackUrl;
+      fallbackWrap.hidden = false;
+    }
+    klookBtn.href = klookUrl || "#";
+    klookBtn.style.pointerEvents = klookUrl ? "auto" : "none";
+    klookBtn.style.opacity = klookUrl ? "1" : "0.45";
+    klookBtn.setAttribute("aria-disabled", klookUrl ? "false" : "true");
+  };
+  input.addEventListener("input", update);
+  wireManualKlookButton(klookBtn, preview, () =>
+    Math.floor(budgetNum - Math.max(0, Math.round(Number(input.value) || 0)))
+  );
+  const revealBtn = document.getElementById("reveal-dest-btn");
+  if (revealBtn && wasSurprise) {
+    revealBtn.addEventListener("click", () => {
+      const card = document.getElementById("surprise-card");
+      if (card) {
+        card.innerHTML = `<div class="surprise-icon">🎉</div><h3>La tua destinazione è... <em style="color:var(--sun)">${escHtml(destReal)}!</em></h3><p style="margin:0.35rem 0 0;font-size:0.9rem">Kiwi e Klook sono già impostati su questa meta.</p>`;
+      }
+      const route = document.querySelector(".package-card__total-label");
+      if (route) route.textContent = `✈️ ${fromLabel} → ${escHtml(destReal)}`;
+    });
+  }
+  update();
 }
 
 function renderKlookPackageResults(preview, insurance, wasSurprise) {
@@ -725,13 +1184,13 @@ function renderKlookPackageResults(preview, insurance, wasSurprise) {
   const hotelName = String(refHotel.name || "").trim();
   const overrunLikely = preview.budget_overrun_likely === true;
   const risparmioNum = Number(preview.risparmio);
-  const klookHref = escHtml(klookHotelHref(preview));
+  const hotelHref = escHtml(primaryHotelHref(preview));
   const kiwiHref = escHtml(effectiveFlightUrl(f));
   const flightBtn = flightButtonLabel(null, f, preview);
   const flightIndicative = flightIsIndicative(preview, f);
   const klookCopy =
     String(preview.stay_pricing_disclaimer || "").trim() ||
-    "Apriamo Klook con destinazione, date, ospiti e filtro prezzo entro il budget residuo dopo il volo.";
+    "Apriamo Aviasales Hotels con destinazione e date già impostate.";
   const cityShown = escHtml(sanitizeCityForDisplay(preview.destination_city || f.destination || ""));
   const maxNightDisplay = maxPerNight || (nights > 0 ? Math.floor(hotelQuota / nights) : hotelQuota);
 
@@ -766,7 +1225,9 @@ function renderKlookPackageResults(preview, insurance, wasSurprise) {
     if (pricesVerified && hotelEuro > 0) {
       html += `<div class="results-budget-summary"><p><strong>Budget €${budgetNum}</strong> · Pacchetto <strong>€${planTotal}</strong> = Volo <strong>€${fpEuro}</strong> + Hotel <strong>€${hotelEuro}</strong>.</p></div>`;
     } else if (flightIndicative) {
-      html += `<div class="results-budget-summary"><p><strong>Budget totale €${budgetNum}</strong> per ${paxCount} adulto/i · Volo non verificato: controlla prima Aviasales. Hotel Klook filtrato solo in modo indicativo fino a <strong>€${hotelQuota}</strong>.</p></div>`;
+      html += `<div class="results-budget-summary"><p><strong>Budget totale €${budgetNum}</strong> per ${paxCount} adulto/i · Volo non verificato: controlla prima Aviasales. Nessun prezzo hotel viene mostrato senza verifica.</p></div>`;
+    } else if (!pricesVerified) {
+      html += `<div class="results-budget-summary"><p><strong>Budget €${budgetNum}</strong> · Volo verificato <strong>€${fpEuro}</strong>. Nessun prezzo hotel verificato: apri Aviasales Hotels per controllare disponibilità e totale.</p></div>`;
     } else {
       html += `<div class="results-budget-summary"><p><strong>Budget €${budgetNum}</strong> · Piano <strong>€${planTotal}</strong> (volo €${fpEuro} + hotel max €${hotelQuota}).</p></div>`;
     }
@@ -783,32 +1244,32 @@ function renderKlookPackageResults(preview, insurance, wasSurprise) {
     <div class="package-card__top">
       <span class="package-card__badge">Volo + hotel</span>
       <div class="package-card__total">
-        <span class="package-card__total-label">${pricesVerified ? "Totale pacchetto" : "Il tuo viaggio"}</span>
+        <span class="package-card__total-label">${pricesVerified ? "Totale pacchetto" : "Volo trovato"}</span>
         <strong class="package-card__total-eur">${pricesVerified ? `€${planTotal}` : escHtml(`${fromLabel} → ${destLabel}`)}</strong>
         <span class="package-card__total-sub">${escHtml(f.departDate)} → ${escHtml(f.returnDate)} · ${nights} notti</span>
       </div>
     </div>
     <div class="klook-budget-box">
-      <p class="klook-budget-box__title">${pricesVerified && hotelName ? escHtml(hotelName) : "Alloggio nel budget"}</p>
-      <p class="klook-budget-box__amount">${pricesVerified && hotelEuro > 0 ? `Volo <strong>€${fpEuro}</strong> + Hotel <strong>€${hotelEuro}</strong>` : `Max <strong>€${maxNightDisplay}</strong>/notte`}</p>
-      <p class="klook-budget-box__sub">${pricesVerified ? `${cityShown} · ${nights} notti` : `≈ €${hotelQuota} per ${nights} notti a ${cityShown}`}</p>
+      <p class="klook-budget-box__title">${pricesVerified && hotelName ? escHtml(hotelName) : "Hotel da verificare"}</p>
+      <p class="klook-budget-box__amount">${pricesVerified && hotelEuro > 0 ? `Volo <strong>€${fpEuro}</strong> + Hotel <strong>€${hotelEuro}</strong>` : `Nessun prezzo hotel verificato`}</p>
+      <p class="klook-budget-box__sub">${pricesVerified ? `${cityShown} · ${nights} notti` : `Apri Aviasales Hotels per ${cityShown} · ${nights} notti`}</p>
     </div>
     <p class="klook-microcopy">${escHtml(klookCopy)}</p>
     <div class="package-card__actions package-card__actions--stacked">
-      <a href="${klookHref}" target="_blank" rel="noopener noreferrer sponsored" class="package-btn package-btn--klook">Verifica hotel su Klook</a>
+      <a href="${hotelHref}" target="_blank" rel="noopener noreferrer sponsored" class="package-btn package-btn--klook">Verifica hotel su Aviasales</a>
       <a href="${kiwiHref}" target="_blank" rel="noopener noreferrer sponsored" class="package-btn package-btn--kiwi">${escHtml(flightBtn)}</a>
     </div>
-    <p class="package-card__fineprint">Volo: verifica su Aviasales. Hotel: ricerca Klook con date e ospiti già inseriti.</p>
+    <p class="package-card__fineprint">Volo: prezzo Travelpayouts/Aviasales. Hotel: prezzo mostrato solo se verificato da Xotelo/Amadeus; altrimenti apriamo Aviasales Hotels.</p>
   </article>`;
 
-  html += `<p class="hotel-partner-note">Due passaggi separati: hotel su Klook, voli su Aviasales.</p>`;
+  html += `<p class="hotel-partner-note">Due passaggi separati: hotel su Aviasales Hotels, voli su Aviasales.</p>`;
 
   html += `<div class="total-card">
     <div class="total-rows">
       ${budgetNum > 0 ? `<div class="total-row-item total-row-item--budget"><span>🎯 Budget</span><span>€${budgetNum}</span></div>` : ""}
       <div class="total-row-item"><span>📋 ${pricesVerified ? "Totale quotato" : "Piano"}</span><span>€${planTotal}</span></div>
       <div class="total-row-item"><span>✈️ Volo</span><span>€${fpEuro}</span></div>
-      <div class="total-row-item"><span>🏨 Hotel</span><span>€${pricesVerified ? hotelEuro : hotelQuota}</span></div>
+      <div class="total-row-item"><span>🏨 Hotel</span><span>${pricesVerified ? `€${hotelEuro}` : "da verificare"}</span></div>
       ${Number.isFinite(risparmioNum) && risparmioNum >= 0 && budgetNum > 0 ? `<div class="total-row-item"><span>💚 Dopo il volo (per hotel)</span><span>~€${risparmioNum}</span></div>` : ""}
     </div>
     <a href="/offerta-live" class="prenota-btn" style="text-align:center;text-decoration:none;display:block">Apri pagina risultati →</a>
@@ -859,7 +1320,7 @@ function renderLegacyPackageResults(preview, insurance, wasSurprise) {
           within_budget: true,
           kiwi_link: effectiveFlightUrl(f),
           flight_link_source: f.flightLinkSource || "kiwi_search",
-          booking_link: h.bookingLink || klookHotelHref(preview),
+          booking_link: h.bookingLink || primaryHotelHref(preview),
           air_help_link: airHelpHref,
           hotel: {
             name: h.name,
@@ -928,7 +1389,7 @@ function renderLegacyPackageResults(preview, insurance, wasSurprise) {
     const bookHref =
       String(pkg.booking_link || "").trim() ||
       String((preview.hotels && preview.hotels[0] && preview.hotels[0].bookingLink) || "").trim() ||
-      klookHotelHref(preview);
+      primaryHotelHref(preview);
     const pkgAirHelp = String(pkg.air_help_link || "").trim() || airHelpHref;
     const flightPkg = Math.round(Number(pkg.flight_price_euro) || 0);
     const hotelQuota = Math.round(Number(pkg.hotel_price_euro) || 0);

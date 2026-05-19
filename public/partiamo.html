@@ -1,14 +1,6 @@
 <!DOCTYPE html>
 <html lang="it">
   <head>
-    <script nowprocket data-noptimize="1" data-cfasync="false" data-wpfc-render="false" seraph-accel-crit="1" data-no-defer="1">
-      (function () {
-          var script = document.createElement("script");
-          script.async = 1;
-          script.src = 'https://tp-em.com/NTI2MjM3.js?t=526237';
-          document.head.appendChild(script);
-      })();
-    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PartiAMO — Viaggia nel tuo budget</title>
@@ -17,7 +9,7 @@
       href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/home.css" />
+    <link rel="stylesheet" href="/home.css?v=20260519contest2" />
   </head>
   <body>
     <a class="site-brand-banner" href="/" aria-label="PartiAMO - Home">
@@ -161,9 +153,93 @@
       <div class="badge">✨ Alert viaggi intelligenti</div>
       <h1>Viaggia quando il <em>prezzo</em> è dalla tua parte.</h1>
       <p class="hero-sub">
-        Inserisci budget, date e partenza. PartiAMO trova il volo più economico e ti reindirizza su Klook per l'alloggio nel tuo budget — commissioni tracciate via Travelpayouts.
+        Inserisci budget, date e partenza. PartiAMO prepara Kiwi per il volo e Klook per l'hotel: tu inserisci il prezzo volo trovato e noi calcoliamo il budget residuo.
       </p>
+    </section>
 
+    <section class="contest" aria-labelledby="contest-heading">
+      <div class="contest-inner">
+        <div class="contest-badge">🏆 Concorso PartiAMO</div>
+        <h2 id="contest-heading" class="contest-title">
+          Vinci un volo per <em>2 persone</em> in qualsiasi parte del mondo!
+        </h2>
+        <p class="contest-sub">
+          Ogni prenotazione volo+hotel completata tramite PartiAMO conta. Chi prenota di più vince.
+        </p>
+
+        <div class="contest-counter-wrap">
+          <p class="contest-counter" aria-live="polite">
+            <span class="contest-counter__icon" aria-hidden="true">🎯</span>
+            <span class="contest-counter__nums">
+              <strong id="contest-bookings-count">0</strong>
+              <span class="contest-counter__sep">/</span>
+              <span id="contest-bookings-goal">1000</span>
+              <span class="contest-counter__label"> prenotazioni completate</span>
+            </span>
+          </p>
+          <div
+            class="contest-progress"
+            role="progressbar"
+            aria-valuemin="0"
+            aria-valuemax="1000"
+            aria-valuenow="0"
+            aria-label="Progresso verso 1000 prenotazioni"
+          >
+            <div class="contest-progress__fill" id="contest-progress-fill" style="width: 0%"></div>
+          </div>
+          <p class="contest-progress-caption">Obiettivo community: 1000 prenotazioni volo+hotel</p>
+        </div>
+
+        <div class="contest-rules">
+          <h3 class="contest-rules__title">Regolamento</h3>
+          <ul class="contest-rules__list">
+            <li>Prenota il <strong>volo su Kiwi.com</strong> da desktop tramite PartiAMO</li>
+            <li>Prenota l'<strong>hotel su Klook</strong> da desktop tramite PartiAMO</li>
+            <li class="contest-rules__warn">
+              ⚠️ Le prenotazioni da <strong>app mobile</strong> non sono tracciate — usa sempre il <strong>browser desktop</strong>
+            </li>
+            <li>Ogni prenotazione volo+hotel completata = <strong>1 punto</strong></li>
+            <li>
+              Chi ha più punti al raggiungimento di <strong>1000 prenotazioni totali</strong> vince
+              <strong>2 biglietti aerei</strong> per qualsiasi destinazione mondiale
+            </li>
+            <li>Il vincitore viene <strong>annunciato pubblicamente</strong> su PartiAMO</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="how how--above-search" aria-labelledby="how-heading">
+      <div class="how-inner">
+        <h2 id="how-heading">Come funziona</h2>
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-text">
+            <strong>Inserisci il budget totale</strong><span>Quanto vuoi spendere in tutto per volo + hotel, per tutte le persone del viaggio.</span>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-text">
+            <strong>Scegli o lascia scegliere a noi</strong><span>Inserisci una destinazione o attiva la modalità sorpresa.</span>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-text">
+            <strong>Prima il volo su Kiwi</strong><span>Apri Kiwi già precompilato, scegli il volo e torna qui a inserire il prezzo totale trovato.</span>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <div class="step-text">
+            <strong>Poi hotel su Klook</strong><span>Partiamo calcola il budget hotel residuo e sblocca Klook con date, ospiti e filtro prezzo già impostati.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="search-section" aria-label="Cerca viaggio">
       <div class="search-card">
         <div class="fields-row">
           <div class="field field--autocomplete">
@@ -174,7 +250,7 @@
                 id="from"
                 name="from"
                 required
-                placeholder="Cerca aeroporto nel mondo (es. Tokyo, JFK)"
+                placeholder="Città o aeroporto (es. Roma, FCO)"
                 autocomplete="off"
                 aria-autocomplete="list"
                 aria-controls="from-suggestions"
@@ -190,7 +266,7 @@
                 type="text"
                 id="to"
                 name="to"
-                placeholder="Cerca aeroporto o città nel mondo (es. Tokyo, JFK)"
+                placeholder="Città o aeroporto (es. Cipro, Barcellona)"
                 autocomplete="off"
                 aria-autocomplete="list"
                 aria-controls="to-suggestions"
@@ -217,13 +293,43 @@
             <input type="number" id="budget" name="budget" placeholder="650" min="150" value="650" />
           </div>
         </div>
+        <div class="fields-row passengers-row">
+          <div class="field">
+            <label for="passengers-adults">Adulti</label>
+            <select id="passengers-adults" name="passengers-adults">
+              <option value="1">1</option>
+              <option value="2" selected>2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="passengers-children">Bambini (2–11 anni)</label>
+            <select id="passengers-children" name="passengers-children">
+              <option value="0" selected>0</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="passengers-infants">Neonati (&lt;2 anni)</label>
+            <select id="passengers-infants" name="passengers-infants">
+              <option value="0" selected>0</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+            </select>
+          </div>
+        </div>
         <div class="field">
-          <label for="passengers">Passeggeri</label>
-          <select id="passengers" name="passengers">
-            <option>1 adulto</option>
-            <option selected>2 adulti</option>
-            <option>3 adulti</option>
-            <option>4 adulti</option>
+          <label for="bagaglio">Bagaglio</label>
+          <select id="bagaglio" name="bagaglio">
+            <option value="Solo cabina" selected>Solo bagaglio a mano</option>
+            <option value="Stiva inclusa">Bagaglio in stiva incluso</option>
+            <option value="Mano e stiva">Mano + stiva</option>
           </select>
         </div>
         <div class="surprise-row" role="button" tabindex="0" onclick="toggleSurprise()" onkeydown="if(event.key==='Enter')toggleSurprise()">
@@ -254,42 +360,12 @@
 
     <div class="loading" id="loading">
       <div class="loading-dots"><span></span><span></span><span></span></div>
-      <p>Cerco volo su Aviasales e hotel con prezzo reale nel tuo budget…</p>
+      <p>Preparo link Kiwi e Klook con date, destinazione e passeggeri…</p>
     </div>
 
     <div class="results" id="results"></div>
 
-    <section class="how">
-      <div class="how-inner">
-        <h2>Come funziona</h2>
-        <div class="step">
-          <div class="step-num">1</div>
-          <div class="step-text">
-            <strong>Inserisci il budget totale</strong><span>Quanto vuoi spendere in tutto per volo + hotel. Il volo è indicativo (cache Aviasales); l’alloggio lo cerchi su Klook entro la quota calcolata.</span>
-          </div>
-        </div>
-        <div class="step">
-          <div class="step-num">2</div>
-          <div class="step-text">
-            <strong>Scegli o lascia scegliere a noi</strong><span>Inserisci una destinazione o attiva la modalità sorpresa.</span>
-          </div>
-        </div>
-        <div class="step">
-          <div class="step-num">3</div>
-          <div class="step-text">
-            <strong>Volo + hotel su Klook</strong><span>Selezioniamo i voli più convenienti e calcoliamo il budget residuo per l'hotel, mostrandoti le migliori tariffe all'ingrosso su Klook (ordinate dal prezzo più basso). Verifica il volo su Aviasales prima di prenotare.</span>
-          </div>
-        </div>
-        <div class="step">
-          <div class="step-num">4</div>
-          <div class="step-text">
-            <strong>Prenota in due passi</strong><span>Aviasales per il volo (verifica il prezzo reale). Klook per l’hotel. Controlla sempre i totali sui siti partner. AirHelp per i diritti passeggeri.</span>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="feedback">
+        <section class="feedback">
       <div class="feedback-inner">
         <h2>Cosa dicono le persone 💬</h2>
         <div class="fb-card">
@@ -407,6 +483,6 @@
       </aside>
     </div>
 
-    <script src="/home.js?v=20260517budgettotal2"></script>
+    <script src="/home.js?v=20260519klookcity"></script>
   </body>
 </html>

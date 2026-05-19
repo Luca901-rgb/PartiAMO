@@ -7,6 +7,8 @@ const { sendWelcomeEmail } = require("./email");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+console.log("[startup] server.js caricato, NODE_ENV:", process.env.NODE_ENV);
+
 /** Su Vercel la Lambda ha cwd=/var/task ma gli asset vanno inclusi (vedi vercel.json includeFiles). */
 function resolvePublicDir() {
   const candidates = [
@@ -57,7 +59,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use("/api", async (req, res, next) => {
   // Rotte API senza database
-  if (req.path === "/live-search" || req.path === "/destinations" || req.path === "/airports") {
+  if (req.path === "/live-search" || req.path === "/destinations" || req.path === "/airports" || req.path === "/locations") {
     return next();
   }
   try {
@@ -82,12 +84,36 @@ app.get("/api/airports", (req, res) => {
   try {
     const { searchAirports } = require("./airports");
     const q = String(req.query.q || "").trim();
-    const limit = Number(req.query.limit) || 12;
+    const limit = Number(req.query.limit) || 18;
     const airports = searchAirports(q, limit);
     res.json({ ok: true, airports, total: airports.length });
   } catch (e) {
     console.error("[airports]", e);
     res.status(500).json({ ok: false, error: "Elenco aeroporti non disponibile" });
+  }
+});
+
+/** Ricerca località stile Kiwi (città + aeroporti). */
+app.get("/api/locations", (req, res) => {
+  try {
+    const { searchLocations } = require("./locations");
+    const q = String(req.query.q || "").trim();
+    const limit = Number(req.query.limit) || 18;
+    const scope = String(req.query.scope || "").toLowerCase();
+    let partiamoDestinations = [];
+    if (scope === "to") {
+      try {
+        const DESTINATIONS = require("./destinations-data.json");
+        partiamoDestinations = DESTINATIONS;
+      } catch (_e) {
+        partiamoDestinations = [];
+      }
+    }
+    const locations = searchLocations(q, { limit, partiamoDestinations, scope });
+    res.json({ ok: true, locations, total: locations.length });
+  } catch (e) {
+    console.error("[locations]", e);
+    res.status(500).json({ ok: false, error: "Ricerca località non disponibile" });
   }
 });
 
@@ -137,6 +163,7 @@ app.get("/offerta-live", (req, res) => {
 
 app.post("/api/live-search", async (req, res) => {
   try {
+    console.log("[live-search] richiesta ricevuta", req.body);
     const { getLiveSearchPreview } = require("./search");
     const { resolveAirportIata } = require("./airports");
     const rawOrigin = String(req.body.aeroporto_partenza || "").trim();
@@ -175,13 +202,15 @@ app.post("/api/live-search", async (req, res) => {
       destinazione_sorpresa: req.body.destinazione_sorpresa === "1" ? 1 : 0,
       solo_voli_diretti: req.body.solo_voli_diretti === "1" || req.body.solo_voli_diretti === true ? 1 : 0,
     };
-    const preview = await getLiveSearchPreview(payload);
+    const { repairKlookPreviewTemplates } = require("./klook-affiliate");
+    let preview = await getLiveSearchPreview(payload);
     if (!preview) {
       return res.status(500).json({
         ok: false,
         error: "Impossibile preparare l'offerta in questo momento. Riprova tra poco.",
       });
     }
+    preview = repairKlookPreviewTemplates(preview);
     return res.json({ ok: true, preview });
   } catch (error) {
     if (error?.code === "DESTINATION_UNSUPPORTED") {

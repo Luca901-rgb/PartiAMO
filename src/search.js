@@ -11,8 +11,22 @@ const {
   buildKlookAffiliateHotelUrl,
   buildKlookHotelSearchUrl,
   wrapTravelpayoutsAffiliateUrl,
+  repairKlookPreviewTemplates,
+  applyKlookBudgetToUrl,
+  buildKlookHotelsListUrl,
+  klookPerNightBudget,
   sanitizeCityLabel: sanitizeCityLabelForKlook,
+  klookSearchCityLabel,
+  destinationKlookResolvable,
+  resolveKlookCityPage,
 } = require("./klook-affiliate");
+const {
+  parseTripPassengers,
+  totalTripGuests,
+  hotelGuestCount,
+  klookGuestParams,
+  passengerSummaryIt,
+} = require("./passengers");
 
 /** Notti tra due date ISO (YYYY-MM-DD). */
 function stayNightsBetweenIsoDates(checkIn, checkOut) {
@@ -143,7 +157,6 @@ async function fetchQuotedHotelXoteloSingle(flight, user, destCity, destIata) {
 
 /**
  * Hotel con prezzo verificato (Xotelo prima, poi Amadeus) entro il budget residuo.
- * Link prenotazione: Klook affiliato.
  */
 async function fetchQuotedHotelForLive(flight, user, destCity, destIata) {
   const budget = Math.max(0, Number(user.budget) || 0);
@@ -198,12 +211,7 @@ async function fetchQuotedHotelForLive(flight, user, destCity, destIata) {
           bestPriceProviderName: "Amadeus",
           bestPriceLabel: bestPriceLine,
           photos: [],
-          bookingLink: buildKlookHotelLink(
-            { name: pick.name, googleDisplayName: pick.name, googlePlaceMatched: true },
-            flight,
-            user.persone,
-            city
-          ),
+          bookingLink: buildAviasalesHotelUrlFromFlight(flight, user),
           formattedAddress: city,
         };
       }
@@ -345,45 +353,388 @@ function shuffleDestinationPool(pool) {
   return copy;
 }
 
-/** Mete EU con voli economici frequenti da hub italiani — provate per prime in modalità sorpresa. */
-const SURPRISE_PRIORITY_IATA = [
-  "BCN",
-  "VLC",
-  "MAD",
-  "AGP",
-  "LIS",
-  "OPO",
-  "ATH",
-  "PMI",
-  "IBZ",
-  "NCE",
-  "MRS",
-  "LYS",
-  "PAR",
-  "BER",
-  "AMS",
-  "BUD",
-  "PRG",
-  "VIE",
-  "LON",
-  "DUB",
-  "BRU",
-  "SVQ",
-];
+function isSurpriseSearch(user) {
+  const pref = String(user?.destinazione_preferita || "").trim();
+  return Number(user?.destinazione_sorpresa) === 1 && !pref;
+}
 
-function surpriseDestinationScanOrder(pool) {
-  const byIata = new Map(pool.map((d) => [String(d.iata || "").toUpperCase(), d]));
-  const seen = new Set();
-  const ordered = [];
-  for (const iata of SURPRISE_PRIORITY_IATA) {
-    const hit = byIata.get(iata);
-    if (hit && !seen.has(hit.label)) {
-      ordered.push(hit);
-      seen.add(hit.label);
+function resolveSurpriseOrigin(user) {
+  return (
+    sanitizeIata3(resolveFlightOriginCodes(user.aeroporto_partenza)[0]) ||
+    sanitizeIata3(user.aeroporto_partenza) ||
+    "FCO"
+  );
+}
+
+/** Hub italiani con più collegamenti intercontinentali (stima volo più bassa). */
+const ITALIAN_LONG_HAUL_HUBS = new Set(["FCO", "CIA", "ROM", "MXP", "LIN", "BGY", "BLQ"]);
+
+const SURPRISE_REGION_OVERRIDES = {
+  NYC: "americas",
+  JFK: "americas",
+  EWR: "americas",
+  LGA: "americas",
+  MIA: "americas",
+  LAX: "americas",
+  SFO: "americas",
+  BOS: "americas",
+  ORD: "americas",
+  YTO: "americas",
+  CUN: "americas",
+  TYO: "asia",
+  OSA: "asia",
+  BKK: "asia",
+  HKT: "asia",
+  SIN: "asia",
+  DPS: "asia",
+  PEK: "asia",
+  PKX: "asia",
+  BJS: "asia",
+  SYD: "oceania",
+  MEL: "oceania",
+  DXB: "middle_east",
+  TLV: "middle_east",
+  RAK: "africa",
+  CMN: "africa",
+  TUN: "africa",
+  CAI: "africa",
+  RMF: "africa",
+  FUE: "atlantic",
+  TFS: "atlantic",
+  LPA: "atlantic",
+  ACE: "atlantic",
+  FNC: "atlantic",
+  PDL: "atlantic",
+  ATH: "med",
+  HER: "med",
+  RHO: "med",
+  JTR: "med",
+  JMK: "med",
+  CFU: "med",
+  SKG: "med",
+  IST: "med",
+  AYT: "med",
+  DBV: "med",
+  SPU: "med",
+  MLA: "med",
+  LCA: "med",
+};
+
+function countryToSurpriseRegion(country) {
+  const c = String(country || "")
+    .trim()
+    .toLowerCase();
+  if (!c) return "europe";
+  if (/(united states|canada|mexico|\busa\b)/.test(c)) return "americas";
+  if (/(australia|new zealand)/.test(c)) return "oceania";
+  if (/(japan|thailand|singapore|indonesia|china|vietnam|malaysia|india|korea)/.test(c)) return "asia";
+  if (/(emirates|israel|qatar|bahrain|oman|saudi|turkey|türkiye)/.test(c)) return "middle_east";
+  if (/(morocco|tunisia|egypt|algeria|senegal|south africa|kenya)/.test(c)) return "africa";
+  if (/(greece|cyprus|malta)/.test(c)) return "med";
+  if (/(portugal|spain|canary)/.test(c)) return "atlantic";
+  return "europe";
+}
+
+function surpriseWorldRegion(iata) {
+  const code = sanitizeIata3(iata);
+  if (SURPRISE_REGION_OVERRIDES[code]) return SURPRISE_REGION_OVERRIDES[code];
+  try {
+    const { getAirportByIata } = require("./airports");
+    return countryToSurpriseRegion(getAirportByIata(code)?.country);
+  } catch (_e) {
+    return "europe";
+  }
+}
+
+/** Pool mondiale mescolato; esclude solo l'aeroporto/città di partenza. */
+function buildSurpriseDestinationPool(user) {
+  const origin = resolveSurpriseOrigin(user);
+  const filtered = filterDestinationsByTipo(user.destinazione_tipo).filter((d) => {
+    const code = sanitizeIata3(d.iata);
+    return code && code !== origin;
+  });
+  const base = filtered.length ? filtered : DESTINATIONS.slice();
+  return shuffleDestinationPool(base);
+}
+
+/** Stima volo A/R per adulto da Italia (euristica se non c’è API). */
+const SURPRISE_FLIGHT_HINT_EUR_ADULT = {
+  NYC: 420,
+  LAX: 480,
+  MIA: 380,
+  ORD: 400,
+  BOS: 390,
+  YTO: 350,
+  CUN: 320,
+  TYO: 520,
+  OSA: 500,
+  BKK: 380,
+  HKT: 420,
+  SIN: 480,
+  DPS: 520,
+  SYD: 620,
+  MEL: 580,
+  DXB: 260,
+  CAI: 180,
+  TLV: 200,
+  RAK: 140,
+  CMN: 160,
+  TUN: 130,
+  IST: 190,
+  AYT: 160,
+  REK: 280,
+  JMK: 240,
+  JTR: 210,
+  RHO: 150,
+  HER: 130,
+  CFU: 125,
+  SKG: 115,
+  IBZ: 175,
+  PMI: 140,
+  NCE: 160,
+  MRS: 130,
+  MLA: 120,
+  LCA: 115,
+};
+
+function surpriseFlightHintDestBase(destIata) {
+  const c = sanitizeIata3(destIata);
+  if (!c) return 140;
+  if (SURPRISE_FLIGHT_HINT_EUR_ADULT[c]) return SURPRISE_FLIGHT_HINT_EUR_ADULT[c];
+  const metroList = KIWI_METRO_TO_AIRPORTS[c];
+  if (metroList && metroList.length) {
+    const hints = metroList.map((ap) => SURPRISE_FLIGHT_HINT_EUR_ADULT[ap]).filter(Boolean);
+    if (hints.length) return Math.min(...hints);
+  }
+  const longHaul = new Set([
+    "NYC",
+    "LAX",
+    "MIA",
+    "TYO",
+    "OSA",
+    "BKK",
+    "SIN",
+    "DPS",
+    "SYD",
+    "MEL",
+    "YTO",
+    "ORD",
+    "BOS",
+    "CUN",
+    "SFO",
+  ]);
+  const mid = new Set(["DXB", "CAI", "TLV", "IST", "RAK", "CMN", "TUN", "AYT", "REK", "JFK", "EWR"]);
+  const premiumEu = new Set(["JMK", "JTR", "IBZ", "PMI", "NCE", "MLA", "LCA", "VCE", "FLR"]);
+  const gr = new Set(["ATH", "HER", "RHO", "JTR", "JMK", "CFU", "SKG"]);
+  if (longHaul.has(c)) return 450;
+  if (mid.has(c)) return 220;
+  if (premiumEu.has(c)) return 165;
+  if (gr.has(c)) return 135;
+  return 110;
+}
+
+/** Stima volo A/R per adulto in base a partenza e destinazione. */
+function surpriseFlightHintPerAdult(originIata, destIata) {
+  const origin = sanitizeIata3(originIata);
+  const dest = sanitizeIata3(destIata);
+  let base = surpriseFlightHintDestBase(dest);
+  if (!origin || !dest) return base;
+
+  const oReg = surpriseWorldRegion(origin);
+  const dReg = surpriseWorldRegion(dest);
+  if (oReg === dReg) base = Math.round(base * 0.9);
+  else if (oReg === "europe" && dReg === "med") base = Math.round(base * 1.04);
+  else if (oReg === "europe" && dReg === "atlantic") base = Math.round(base * 1.08);
+
+  if (["americas", "asia", "oceania"].includes(dReg)) {
+    base = Math.round(base * (ITALIAN_LONG_HAUL_HUBS.has(origin) ? 1.03 : 1.16));
+  } else if (dReg === "africa" || dReg === "middle_east") {
+    base = Math.round(base * (ITALIAN_LONG_HAUL_HUBS.has(origin) ? 1.02 : 1.1));
+  }
+
+  const oCoords = amadeusCityCoords[origin];
+  const dCoords = amadeusCityCoords[dest];
+  if (oCoords && dCoords) {
+    const distKm = haversineKm(oCoords.lat, oCoords.lng, dCoords.lat, dCoords.lng);
+    const distHint = Math.round(48 + distKm * 0.055);
+    base = Math.round((base + Math.min(distHint, 720)) / 2);
+  }
+
+  return Math.max(55, base);
+}
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const r = 6371;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return r * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function surpriseBudgetLimits(user) {
+  const budget = Math.max(100, Number(user.budget) || 500);
+  const dates = resolveTravelDates(user);
+  const nights = Math.max(
+    1,
+    Number(user.durata) ||
+      stayNightsBetweenIsoDates(dates.departDate, dates.returnDate)
+  );
+  const minHotel = minHotelStayBudget(nights);
+  const maxFlight = Math.max(50, budget - minHotel);
+  return { budget, nights, minHotel, maxFlight };
+}
+
+/** Margine sotto il budget totale (volo + hotel al click Kiwi/Klook). */
+function surpriseBudgetSlack(user) {
+  const budget = Math.max(100, Number(user.budget) || 500);
+  const adults = Math.max(1, hotelGuestCount(user));
+  const pct = adults <= 1 ? 0.08 : 0.05;
+  const floor = adults <= 1 ? 45 : 30;
+  return Math.min(Math.round(budget * 0.14), Math.max(floor, Math.round(budget * pct)));
+}
+
+/** Stima prudente pacchetto sorpresa (volo + minimo hotel) per restare nel budget reale. */
+function estimateSurprisePackageTotal(user, dest, flightPriceEuro) {
+  const { budget, nights, minHotel } = surpriseBudgetLimits(user);
+  const code = sanitizeIata3(dest.iata);
+  const origin = resolveSurpriseOrigin(user);
+  const adults = Math.max(1, hotelGuestCount(user));
+  const flightRaw =
+    flightPriceEuro != null && Number.isFinite(Number(flightPriceEuro))
+      ? Number(flightPriceEuro)
+      : surpriseFlightHintPerAdult(origin, code) * adults;
+  const flightReserved =
+    flightPriceEuro != null
+      ? Math.ceil(flightRaw * 1.28) + 15
+      : Math.ceil(flightRaw * 1.2) + 14;
+  const minHotelDest = minHotelStayBudgetForDestination(nights, code, dest.label);
+  const soloRoomFactor = adults <= 1 ? 1.1 : 1;
+  const hotelReserved =
+    Math.ceil(Math.max(minHotel, minHotelDest) * soloRoomFactor * 1.06) + 10;
+  const slack = surpriseBudgetSlack(user);
+  return {
+    budget,
+    nights,
+    adults,
+    flightReserved,
+    hotelReserved,
+    slack,
+    maxTotal: Math.max(0, budget - slack),
+    total: flightReserved + hotelReserved,
+  };
+}
+
+function surprisePackageFitsBudget(user, dest, flightPriceEuro) {
+  const est = estimateSurprisePackageTotal(user, dest, flightPriceEuro);
+  return est.total <= est.maxTotal;
+}
+
+function destinationFitsSurpriseBudget(user, dest) {
+  return surprisePackageFitsBudget(user, dest, null);
+}
+
+function pickWeightedSurpriseFromList(user, fits) {
+  if (!fits.length) return null;
+  const scored = fits.map((dest) => {
+    const est = estimateSurprisePackageTotal(user, dest, null);
+    return { dest, estTotal: est.total, maxTotal: est.maxTotal };
+  });
+  const maxTotal = Math.max(1, scored[0].maxTotal);
+  const weights = scored.map((s) => {
+    const u = s.estTotal / maxTotal;
+    if (u < 0.52) return 1;
+    if (u < 0.72) return 3;
+    if (u <= 0.94) return 6;
+    return 2;
+  });
+  let roll = crypto.randomInt(0, weights.reduce((a, b) => a + b, 0));
+  for (let i = 0; i < scored.length; i += 1) {
+    roll -= weights[i];
+    if (roll < 0) return scored[i].dest;
+  }
+  return scored[scored.length - 1].dest;
+}
+
+/** Sceglie una meta in budget: prima un'area del mondo, poi varietà dentro l'area. */
+function pickVariedSurpriseDestination(user, fits) {
+  if (!fits.length) return null;
+  const byRegion = new Map();
+  for (const dest of fits) {
+    const region = surpriseWorldRegion(dest.iata);
+    if (!byRegion.has(region)) byRegion.set(region, []);
+    byRegion.get(region).push(dest);
+  }
+  const regions = shuffleDestinationPool([...byRegion.keys()]);
+  return pickWeightedSurpriseFromList(user, byRegion.get(regions[0]));
+}
+
+async function pickSurpriseDestination(user) {
+  user = { ...user, aeroporto_partenza: user.aeroporto_partenza || resolveSurpriseOrigin(user) };
+  const pool = buildSurpriseDestinationPool(user);
+  if (!pool.length) {
+    const err = new Error("Nessuna meta sorpresa disponibile per questo tipo di viaggio.");
+    err.code = "DESTINATION_UNSUPPORTED";
+    throw err;
+  }
+
+  const { maxFlight } = surpriseBudgetLimits(user);
+  const heuristicFits = pool.filter((d) => destinationFitsSurpriseBudget(user, d));
+  const shortlist = shuffleDestinationPool(heuristicFits);
+
+  const token = (process.env.TRAVELPAYOUTS_API_TOKEN || "").trim();
+  if (token && maxFlight >= 50 && shortlist.length) {
+    const liveFits = [];
+    const scanCap = Math.min(22, shortlist.length);
+    for (let i = 0; i < scanCap; i += 1) {
+      const dest = shortlist[i];
+      const sub = {
+        ...user,
+        destinazione_preferita: dest.label,
+        destinazione_iata: dest.iata,
+        destinazione_sorpresa: 0,
+      };
+      try {
+        const flights = await searchFlightsAzair(sub, { exactDates: true });
+        if (!flights.length) continue;
+        const total = flightPriceTotalForUser(flights[0], user);
+        if (total <= maxFlight && surprisePackageFitsBudget(user, dest, total)) {
+          const est = estimateSurprisePackageTotal(user, dest, total);
+          liveFits.push({ dest, total, estTotal: est.total });
+        }
+      } catch (_e) {
+        // prova la meta successiva
+      }
+    }
+    if (liveFits.length) {
+      const picked = pickVariedSurpriseDestination(
+        user,
+        liveFits.map((x) => x.dest)
+      );
+      return {
+        code: sanitizeIata3(picked.iata),
+        label: picked.label,
+        pick_source: "live_price",
+      };
     }
   }
-  const rest = shuffleDestinationPool(pool.filter((d) => !seen.has(d.label)));
-  return ordered.concat(rest);
+
+  if (!heuristicFits.length) {
+    const err = new Error(
+      "Nessuna meta sorpresa compatibile con il budget indicato. Prova ad alzare il budget o accorciare il soggiorno."
+    );
+    err.code = "DESTINATION_UNSUPPORTED";
+    throw err;
+  }
+
+  const picked = pickVariedSurpriseDestination(user, heuristicFits);
+  return {
+    code: sanitizeIata3(picked.iata),
+    label: picked.label,
+    pick_source: "budget_heuristic",
+  };
 }
 
 function stayNightsFromFlight(flight, fallbackDurata) {
@@ -576,14 +927,20 @@ const HOTEL_BUDGET_BUFFER_MIN_EUR = 12;
 function flightPriceReservedForBudget(flightPrice, priceSource) {
   const p = Number(flightPrice);
   if (!Number.isFinite(p) || p < 0) return 0;
-  if (priceSource === "travelpayouts") {
+  if (isTravelpayoutsFlightSource(priceSource)) {
     return Math.ceil(p * FLIGHT_CACHE_BUDGET_MULTIPLIER) + FLIGHT_CACHE_BUDGET_MIN_EUR;
   }
   return Math.ceil(p * FLIGHT_BUDGET_BUFFER_RATIO) + FLIGHT_BUDGET_BUFFER_MIN_EUR;
 }
 
+function isTravelpayoutsFlightSource(priceSource) {
+  return ["travelpayouts", "travelpayouts_matrix", "travelpayouts_cheap"].includes(
+    String(priceSource || "").trim()
+  );
+}
+
 function flightPriceIsIndicative(priceSource) {
-  return priceSource === "travelpayouts";
+  return isTravelpayoutsFlightSource(priceSource);
 }
 
 function hotelPriceReservedForBudget(hotelTotalStay) {
@@ -669,6 +1026,17 @@ const DESTINATION_HOTEL_FLOOR_PER_NIGHT_EUR = {
   BGY: 160,
   VCE: 170,
   FLR: 165,
+  JMK: 165,
+  JTR: 145,
+  RHO: 95,
+  HER: 85,
+  CFU: 85,
+  SKG: 75,
+  IBZ: 125,
+  PMI: 95,
+  NCE: 130,
+  MLA: 110,
+  LCA: 90,
   PEK: 110,
   PKX: 110,
   BKK: 70,
@@ -690,6 +1058,8 @@ const COUNTRY_HOTEL_FLOOR_PER_NIGHT_EUR = {
   Germany: 120,
   Italy: 95,
   Spain: 90,
+  Greece: 88,
+  Portugal: 82,
   China: 95,
 };
 
@@ -949,7 +1319,7 @@ function mapTravelpayoutsV3RowToFlight(row, ctx) {
     pricePerPerson: unitPrice,
     price: Math.round(unitPrice * adults),
     passengersAdults: adults,
-    priceSource: "travelpayouts",
+    priceSource: ctx.priceSource || "travelpayouts",
     coverPhoto: FLIGHT_COVER_PHOTOS[Math.floor(Math.random() * FLIGHT_COVER_PHOTOS.length)],
     providerLinkPath: typeof row.link === "string" ? row.link : "",
   };
@@ -1010,8 +1380,10 @@ async function fetchTravelpayoutsV3RouteFlights(ctx) {
         `https://api.travelpayouts.com/aviasales/v3/prices_for_dates?${params.toString()}`,
         { signal: controller.signal, headers: travelpayoutsRequestHeaders(token) }
       );
+      console.log("[tp-DEBUG] fetch status:", response.status, response.url);
       if (!response.ok) continue;
       const payload = await response.json();
+      console.log("[tp-flights] risposta API:", JSON.stringify(payload).slice(0, 500));
       if (!(payload?.success && Array.isArray(payload.data))) continue;
       for (const row of payload.data) {
         const f = mapTravelpayoutsV3RowToFlight(row, ctx);
@@ -1054,8 +1426,10 @@ async function fetchTravelpayoutsV1CheapFlights(ctx) {
         `https://api.travelpayouts.com/v1/prices/cheap?${params.toString()}`,
         { signal: controller.signal, headers: travelpayoutsRequestHeaders(token) }
       );
+      console.log("[tp-DEBUG] fetch status:", response.status, response.url);
       if (!response.ok) continue;
       const payload = await response.json();
+      console.log("[tp-flights] risposta API:", JSON.stringify(payload).slice(0, 500));
       if (!payload?.success || !payload.data) continue;
       for (const f of mapTravelpayoutsV1CheapEntries(payload.data, ctx)) {
         if (directOnly && f.flightType !== "Diretto") continue;
@@ -1068,6 +1442,108 @@ async function fetchTravelpayoutsV1CheapFlights(ctx) {
     }
   }
   return out;
+}
+
+function flattenTravelpayoutsRows(data) {
+  if (Array.isArray(data)) return data;
+  if (!data || typeof data !== "object") return [];
+  const rows = [];
+  for (const value of Object.values(data)) {
+    if (Array.isArray(value)) rows.push(...value);
+    else if (value && typeof value === "object") rows.push(...Object.values(value));
+  }
+  return rows.filter((row) => row && typeof row === "object");
+}
+
+async function fetchTravelpayoutsV2MonthMatrixFlights(ctx) {
+  const { token, currency, originCode, tpDestination, departDate, returnDate, directOnly } = ctx;
+  const params = new URLSearchParams({
+    origin: originCode,
+    destination: tpDestination,
+    currency,
+    show_to_affiliates: "true",
+    token,
+  });
+  const controller = new AbortController();
+  const tid = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(
+      `https://api.travelpayouts.com/v2/prices/month-matrix?${params.toString()}`,
+      { signal: controller.signal, headers: travelpayoutsRequestHeaders(token) }
+    );
+    console.log("[tp-DEBUG] fetch status:", response.status, response.url);
+    if (!response.ok) return [];
+    const payload = await response.json();
+    console.log("[tp-flights] risposta API:", JSON.stringify(payload).slice(0, 500));
+    const rows = flattenTravelpayoutsRows(payload?.data);
+    const targetMs = new Date(departDate).getTime();
+    const mapped = rows
+      .map((row) => {
+        const dep =
+          String(row.depart_date || row.departure_at || row.departure_date || row.date || "").slice(0, 10) ||
+          departDate;
+        const price = Number(row.value ?? row.price);
+        if (!Number.isFinite(price) || price <= 0 || !isIsoDate(dep)) return null;
+        const ret =
+          String(row.return_date || row.return_at || "").slice(0, 10) ||
+          (isIsoDate(returnDate) ? returnDate : addDaysIso(dep, Number(ctx.user?.durata || 3)));
+        const transfers = Number(row.number_of_changes ?? row.transfers ?? 0);
+        if (directOnly && transfers !== 0) return null;
+        return {
+          row: {
+            origin: row.origin || originCode,
+            destination: row.destination || tpDestination,
+            departure_at: dep,
+            return_at: ret,
+            transfers,
+            airline: row.airline,
+            price,
+            link: "",
+          },
+          distance: Math.abs(new Date(dep).getTime() - targetMs),
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.distance - b.distance || Number(a.row.price) - Number(b.row.price));
+    const best = mapped[0];
+    if (!best) return [];
+    const f = mapTravelpayoutsV3RowToFlight(best.row, { ...ctx, priceSource: "travelpayouts_matrix" });
+    return f ? [f] : [];
+  } catch (_e) {
+    return [];
+  } finally {
+    clearTimeout(tid);
+  }
+}
+
+async function fetchTravelpayoutsV1CheapFlightsNoDates(ctx) {
+  const { token, currency, originCode, tpDestination, directOnly } = ctx;
+  const params = new URLSearchParams({
+    origin: originCode,
+    destination: tpDestination,
+    currency,
+    token,
+  });
+  const controller = new AbortController();
+  const tid = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch(
+      `https://api.travelpayouts.com/v1/prices/cheap?${params.toString()}`,
+      { signal: controller.signal, headers: travelpayoutsRequestHeaders(token) }
+    );
+    console.log("[tp-DEBUG] fetch status:", response.status, response.url);
+    if (!response.ok) return [];
+    const payload = await response.json();
+    console.log("[tp-flights] risposta API:", JSON.stringify(payload).slice(0, 500));
+    if (!payload?.success || !payload.data) return [];
+    return mapTravelpayoutsV1CheapEntries(payload.data, { ...ctx, priceSource: "travelpayouts_cheap" }).filter(
+      (f) => !directOnly || f.flightType === "Diretto"
+    );
+  } catch (_e) {
+    return [];
+  } finally {
+    clearTimeout(tid);
+  }
 }
 
 function mergeTravelpayoutsFlightResults(bestFlights, maxFlightReserved, options = {}) {
@@ -2403,6 +2879,7 @@ function buildEstimatedFlightOffers(user, destinationCode, destinationLabel, dep
 }
 
 async function searchFlightsAzair(user, options = {}) {
+  console.log("[tp-DEBUG] searchFlightsAzair chiamata, token presente:", !!process.env.TRAVELPAYOUTS_API_TOKEN);
   const allowEstimate = options.allowEstimate === true;
   const totalBudget = Math.max(0, Number(user.budget) || 0);
   const tripNights = Math.max(1, Number(user.durata) || 3);
@@ -2412,22 +2889,15 @@ async function searchFlightsAzair(user, options = {}) {
   if (maxFlightReserved < 40 && !allowEstimate) return [];
 
   const pref = user.destinazione_preferita && String(user.destinazione_preferita).trim();
-  const surpriseMode = Number(user.destinazione_sorpresa) === 1 && !pref;
-  if (surpriseMode) {
-    const pool = surpriseDestinationScanOrder(filterDestinationsByTipo(user.destinazione_tipo));
-    const maxScan = Math.min(22, pool.length);
-    for (let i = 0; i < maxScan; i += 1) {
-      const sub = { ...user, destinazione_preferita: pool[i].label, destinazione_sorpresa: 0 };
-      const flights = await searchFlightsAzair(sub, options);
-      if (flights.length) return flights;
-    }
-    if (allowEstimate && pool.length) {
-      const first = pool[0];
-      const code = inferDestinationCode(first.label);
-      const { departDate, returnDate } = resolveTravelDates(user);
-      return buildEstimatedFlightOffers(user, code, first.label, departDate, returnDate);
-    }
-    return [];
+  if (isSurpriseSearch(user)) {
+    const picked = await pickSurpriseDestination(user);
+    const sub = {
+      ...user,
+      destinazione_preferita: picked.label,
+      destinazione_iata: picked.code,
+      destinazione_sorpresa: 0,
+    };
+    return searchFlightsAzair(sub, options);
   }
 
   const token = (process.env.TRAVELPAYOUTS_API_TOKEN || "").trim();
@@ -2501,10 +2971,15 @@ async function searchFlightsAzair(user, options = {}) {
         };
         let chunk = await fetchTravelpayoutsV3RouteFlights(ctx);
         if (!chunk.length) chunk = await fetchTravelpayoutsV1CheapFlights(ctx);
+        if (!chunk.length) chunk = await fetchTravelpayoutsV2MonthMatrixFlights(ctx);
+        if (!chunk.length) chunk = await fetchTravelpayoutsV1CheapFlightsNoDates(ctx);
         bestFlights = bestFlights.concat(chunk);
       }
 
+      console.log("[tp-flights] voli trovati:", bestFlights.length);
       const pick = mergeTravelpayoutsFlightResults(bestFlights, maxFlightReserved);
+      console.log("[tp-flights] voli dopo filtri:", pick.length);
+      console.log("[tp-flights] budget max volo:", maxFlightReserved);
       if (pick.length) return pick;
     } catch (_error) {
       if (allowEstimate) {
@@ -2933,7 +3408,16 @@ function findDestinationRowByLabel(label) {
  * altrimenti Kiwi resta sulla vista tiles / generiche.
  * Formato: /it/search/results/napoli-italia/lione-francia/2026-06-15/2026-06-22/1-0-0/
  */
-function buildKiwiSearchResultsUrl(flight, adults) {
+function normalizeKiwiPassengers(input) {
+  if (input && typeof input === "object" && Number.isFinite(Number(input.adults))) {
+    return parseTripPassengers(input);
+  }
+  const adults = Math.max(1, Math.min(9, Number(input) || 1));
+  return { adults, children: 0, infants: 0 };
+}
+
+function buildKiwiSearchResultsUrl(flight, passengersInput) {
+  const pax = normalizeKiwiPassengers(passengersInput);
   const fromIata = resolveKiwiAirportForUrl(flight.from);
   const toIata = resolveKiwiAirportForUrl(flight.destinationCode);
   let out = String(flight.departDate || "").slice(0, 10);
@@ -2941,7 +3425,6 @@ function buildKiwiSearchResultsUrl(flight, adults) {
   if (isIsoDate(out) && isIsoDate(inn) && new Date(inn) < new Date(out)) {
     inn = addDaysIso(out, 3);
   }
-  const n = Math.max(1, Math.min(9, Number(adults) || 1));
   if (!isIsoDate(out) || !isIsoDate(inn)) return "";
 
   const originRow = findDestinationRowByIata(fromIata);
@@ -2953,14 +3436,15 @@ function buildKiwiSearchResultsUrl(flight, adults) {
   const toSeg = kiwiDestinationSlugForFlightResults(destRow);
   if (!fromSeg || !toSeg) return "";
 
-  const path = `/it/search/results/${fromSeg}/${toSeg}/${out}/${inn}/${n}-0-0/`;
+  const path = `/it/search/results/${fromSeg}/${toSeg}/${out}/${inn}/${pax.adults}-${pax.children}-${pax.infants}/`;
   return `https://www.kiwi.com${path}`;
 }
 
 /**
  * Link diretto kiwi.com (homepage con query) — spesso ignorato dal sito; usato solo come fallback.
  */
-function buildKiwiDirectSearchUrl(flight, adults) {
+function buildKiwiDirectSearchUrl(flight, passengersInput) {
+  const pax = normalizeKiwiPassengers(passengersInput);
   const from = resolveKiwiAirportForUrl(flight.from);
   const to = resolveKiwiAirportForUrl(flight.destinationCode);
   let out = String(flight.departDate || "").slice(0, 10);
@@ -2968,7 +3452,6 @@ function buildKiwiDirectSearchUrl(flight, adults) {
   if (isIsoDate(out) && isIsoDate(inn) && new Date(inn) < new Date(out)) {
     inn = addDaysIso(out, 3);
   }
-  const n = Math.max(1, Math.min(9, Number(adults) || 1));
   if (from.length !== 3 || to.length !== 3 || !isIsoDate(out) || !isIsoDate(inn)) {
     return "";
   }
@@ -2977,9 +3460,45 @@ function buildKiwiDirectSearchUrl(flight, adults) {
   url.searchParams.set("destination", to);
   url.searchParams.set("outboundDate", out);
   url.searchParams.set("inboundDate", inn);
-  url.searchParams.set("passengers", String(n));
+  url.searchParams.set("passengers", String(pax.adults));
+  if (pax.children > 0) url.searchParams.set("children", String(pax.children));
+  if (pax.infants > 0) url.searchParams.set("infants", String(pax.infants));
   url.searchParams.set("lang", "it");
   return url.toString();
+}
+
+/** Valore query Kiwi: `MANO.STIVA-` (1.0- solo mano, 0.1- solo stiva, 1.1- entrambi). */
+function kiwiBagsQueryValue(user) {
+  const bag = String(user?.bagaglio || "Solo cabina").toLowerCase();
+  let hand = 1;
+  let hold = 0;
+  if (/mano e stiva|entrambi/.test(bag)) {
+    hand = 1;
+    hold = 1;
+  } else if (/stiva|hold|checked/.test(bag)) {
+    hand = 0;
+    hold = 1;
+  }
+  return `${hand}.${hold}-`;
+}
+
+/** Filtri Kiwi: voli diretti e bagaglio nel prezzo mostrato. */
+function applyKiwiSearchOptions(urlString, user, opts = {}) {
+  if (!urlString) return "";
+  let u;
+  try {
+    u = new URL(urlString);
+  } catch (_e) {
+    return applyOptionalKiwiQuerySuffix(urlString);
+  }
+  const handBaggageOnly = opts.handBaggageOnly === true;
+  if (!handBaggageOnly && getSoloVoliDiretti(user)) {
+    u.searchParams.set("stopNumber", "0~true");
+  }
+  u.searchParams.set("bags", handBaggageOnly ? "1.0-" : kiwiBagsQueryValue(user));
+  u.searchParams.delete("handBags");
+  u.searchParams.delete("holdBags");
+  return applyOptionalKiwiQuerySuffix(u.toString());
 }
 
 function applyOptionalKiwiQuerySuffix(urlString) {
@@ -3001,15 +3520,15 @@ function applyOptionalKiwiQuerySuffix(urlString) {
   return u.toString();
 }
 
-function buildKiwiAffiliateSearchUrl(flight, adults) {
-  const results = buildKiwiSearchResultsUrl(flight, adults);
+function buildKiwiAffiliateSearchUrl(flight, passengersInput, user) {
+  const results = buildKiwiSearchResultsUrl(flight, passengersInput);
   if (results) {
-    return applyOptionalKiwiQuerySuffix(results);
+    return applyKiwiSearchOptions(results, user);
   }
 
-  const direct = buildKiwiDirectSearchUrl(flight, adults);
+  const direct = buildKiwiDirectSearchUrl(flight, passengersInput);
   if (direct) {
-    return applyOptionalKiwiQuerySuffix(direct);
+    return applyKiwiSearchOptions(direct, user);
   }
 
   const baseRaw = affiliateFlightUrl().replace(/\/$/, "");
@@ -3078,30 +3597,22 @@ function buildAviasalesFlightSearchUrlFromUserDates(flight, contextUser) {
 }
 
 function buildAviasalesHotelUrlFromFlight(flight, contextUser) {
-  const adults = extractAdultsForFlight(flight, contextUser);
-  const host = (process.env.TRAVELPAYOUTS_FLIGHT_HOST || "https://www.aviasales.it").replace(/\/$/, "");
+  const host = "https://www.aviasales.it";
   let url;
   try {
-    // Hotel tab: do not reuse the flight deeplink path, because cached flight dates may differ
-    // from the user's requested stay dates and Aviasales can prefer the path segment.
     url = new URL("/search", `${host}/`);
   } catch (_e) {
     return "";
   }
 
-  const marker = (process.env.TRAVELPAYOUTS_MARKER || "").trim();
+  const marker = (process.env.TRAVELPAYOUTS_MARKER || "725780").trim();
   const stayDates = stayDatesForOffer(flight, contextUser || {});
-  const origin = sanitizeIata3(flight?.from || contextUser?.aeroporto_partenza);
   const destination = sanitizeIata3(flight?.destinationCode || contextUser?.destinazione_iata);
-  if (marker) url.searchParams.set("marker", marker);
   url.searchParams.set("show_hotels", "1");
-  url.searchParams.set("ct_rooms", "1");
-  url.searchParams.set("ct_guests", `${adults} passenger${adults === 1 ? "" : "s"}`);
-  if (origin) url.searchParams.set("origin_iata", origin);
   if (destination) url.searchParams.set("destination_iata", resolveTravelpayoutsDestinationCode(destination) || destination);
   if (isIsoDate(stayDates.checkIn)) url.searchParams.set("depart_date", stayDates.checkIn);
   if (isIsoDate(stayDates.checkOut)) url.searchParams.set("return_date", stayDates.checkOut);
-  url.searchParams.set("with_request", "1");
+  if (marker) url.searchParams.set("marker", marker);
   return url.toString();
 }
 
@@ -3111,30 +3622,25 @@ function attachFlightAffiliateLinks(flight, contextUser) {
   const tpDeep = buildTravelpayoutsFlightDeepUrl(flight.providerLinkPath);
   const aviasalesSearch = buildAviasalesFlightSearchUrlFromUserDates(flight, contextUser);
   flight.exactFlightLink = tpDeep || "";
-  flight.flightLink = aviasalesSearch || tpDeep || buildKiwiAffiliateSearchUrl(flight, adults);
+  const pax = parseTripPassengers(contextUser || { persone: adults });
+  flight.flightLink = aviasalesSearch || tpDeep || buildKiwiAffiliateSearchUrl(flight, pax, contextUser);
   flight.flightLinkSource = aviasalesSearch ? "aviasales_search" : tpDeep ? "travelpayouts" : "kiwi_search";
   flight.hotelLink = buildAviasalesHotelUrlFromFlight(flight, contextUser);
   flight.airHelpLink = affiliateAirHelpUrl();
   delete flight.providerLinkPath;
 }
 
-function hotelGuestCount(user) {
-  const raw = String(user.persone || "1").replace(/\D/g, "");
-  const n = Number(raw) || 1;
-  return Math.max(1, Math.min(9, n));
-}
-
 /** Prezzo unitario adulto (Travelpayouts = per persona, andata+ritorno). */
 function flightPricePerPerson(flight) {
   const pp = Number(flight?.pricePerPerson);
   if (Number.isFinite(pp) && pp > 0) return pp;
-  if (flight?.priceSource === "travelpayouts") return Number(flight?.price) || 0;
+  if (isTravelpayoutsFlightSource(flight?.priceSource)) return Number(flight?.price) || 0;
   return Number(flight?.price) || 0;
 }
 
 function flightPriceTotalForUser(flight, user) {
   const adults = extractAdultsForFlight(flight, user);
-  if (flight?.priceSource === "travelpayouts") {
+  if (isTravelpayoutsFlightSource(flight?.priceSource)) {
     return Math.round(flightPricePerPerson(flight) * adults);
   }
   const pp = Number(flight?.pricePerPerson);
@@ -3146,7 +3652,7 @@ function normalizeFlightPricesForPassengers(flight, user) {
   const adults = hotelGuestCount(user);
   flight.passengersAdults = adults;
   const unit = flightPricePerPerson(flight);
-  if (flight.priceSource === "travelpayouts" || Number.isFinite(Number(flight.pricePerPerson))) {
+  if (isTravelpayoutsFlightSource(flight.priceSource) || Number.isFinite(Number(flight.pricePerPerson))) {
     flight.pricePerPerson = Math.round(unit);
     flight.price = Math.round(unit * adults);
     return;
@@ -3270,10 +3776,7 @@ async function buildCandidateFromFlight(flight, user, opts = {}) {
   const nights = stayNightsForOffer(flight, user);
   const fit = packageTripFitsBudget(B, fp, nights, flight.priceSource);
   const fitsPessimistic = fit.ok;
-  if (requireQuoted) {
-    const minHotel = minHotelStayBudget(nights);
-    if (fp + minHotel > B) return null;
-  } else if (!relaxed && !fitsPessimistic) {
+  if (!requireQuoted && !relaxed && !fitsPessimistic) {
     return null;
   }
 
@@ -3303,7 +3806,7 @@ async function buildCandidateFromFlight(flight, user, opts = {}) {
   }
 
   if (!relaxed && !isBookableHotelLink(stayHotel.bookingLink)) return null;
-  const klookHotelUrl = stayHotel.bookingLink;
+  const hotelBookingUrl = stayHotel.bookingLink;
 
   const hotelPrice = Math.round(Number(stayHotel.price) || 0);
   const pricesVerified =
@@ -3338,7 +3841,7 @@ async function buildCandidateFromFlight(flight, user, opts = {}) {
     hotel_max_per_night_euro: pricesVerified
       ? Math.max(1, Math.floor(hotelPrice / Math.max(1, nights)))
       : maxPerNight,
-    klook_hotel_url: klookHotelUrl,
+    aviasales_hotel_url: hotelBookingUrl,
     stay_nights: stayHotel.stayNights,
     prezzo_totale,
     risparmio: Math.max(0, Math.floor(B - prezzo_totale)),
@@ -3379,7 +3882,7 @@ async function findBestOfferCandidate(user, options = {}) {
 
   let flightsSorted = [...flightsRaw].sort((a, b) => Number(a.price) - Number(b.price));
   if (requireQuoted) {
-    flightsSorted = flightsSorted.filter((f) => f.priceSource === "travelpayouts");
+    flightsSorted = flightsSorted.filter((f) => isTravelpayoutsFlightSource(f.priceSource));
     if (!flightsSorted.length) {
       throw quotedPackageUnavailableError(user);
     }
@@ -3562,7 +4065,7 @@ function assembleLivePreviewFromCandidate(payload, candidate) {
     : Math.min(budgetNum, hotelBudget.packagePlanTotal);
   const klookHotelDirectUrl =
     String(candidate.klook_hotel_direct_url || "").trim() ||
-    buildKlookHotelSearchUrl({
+    (pricesVerified ? "" : buildKlookHotelSearchUrl({
       city: destCity,
       destIata: flight.destinationCode,
       checkIn: stayDates.checkIn,
@@ -3571,12 +4074,14 @@ function assembleLivePreviewFromCandidate(payload, candidate) {
       currency: "EUR",
       maxPricePerNight: hotelBudget.hotelMaxPerNight,
       maxTotalPrice: hotelBudget.hotelTotalBudget,
-    });
+    }));
   const klookHotelUrl =
     String(candidate.klook_hotel_url || "").trim() ||
-    wrapTravelpayoutsAffiliateUrl(klookHotelDirectUrl) ||
-    klookHotelDirectUrl;
+    klookHotelDirectUrl ||
+    "";
   const aviasalesHotelUrl =
+    String(candidate.aviasales_hotel_url || "").trim() ||
+    String(candidate.hotels?.[0]?.bookingLink || "").trim() ||
     String(flight.hotelLink || "").trim() ||
     buildAviasalesHotelUrlFromFlight(flight, payload);
   const maxPerNight =
@@ -3601,13 +4106,13 @@ function assembleLivePreviewFromCandidate(payload, candidate) {
     (!pricesVerified && flight.priceSource === "estimate") ||
     (!pricesVerified &&
     (worstClick > budgetNum + 40 ||
-      (flight.priceSource === "travelpayouts" && fpReserved > budgetNum)));
+      (isTravelpayoutsFlightSource(flight.priceSource) && fpReserved > budgetNum)));
 
   const budgetNote = pricesVerified
-    ? `Pacchetto quotato €${packageTotal}: volo €${fp} + hotel €${hotelEuro} (${nights} notti)${refHotel.name ? ` · ${refHotel.name}` : ""}. Volo: ${voloNote} — conferma su Aviasales. Hotel: ${refHotel.bestPriceProviderName || "Amadeus/Xotelo"} — verifica su Klook.`
+    ? `Pacchetto quotato €${packageTotal}: volo €${fp} + hotel €${hotelEuro} (${nights} notti)${refHotel.name ? ` · ${refHotel.name}` : ""}. Volo: ${voloNote} — conferma su Aviasales. Hotel: ${refHotel.bestPriceProviderName || "Amadeus/Xotelo"} verificato.`
     : flight.priceSource === "estimate"
       ? `Budget totale €${budgetNum}: il volo non ha un prezzo verificato, quindi la combinazione non è garantita. Verifica prima il totale volo su Aviasales; Klook viene filtrato solo come quota indicativa.`
-      : `Piano nel budget €${budgetNum}: volo ~€${fp}, alloggio fino a ~€${quota} (${nights} notti). Volo: ${voloNote}.`;
+      : `Volo trovato su Aviasales a circa €${fp}. Non mostriamo prezzi hotel senza verifica Xotelo/Amadeus: apri Aviasales Hotels con date e destinazione già impostate.`;
 
   return {
     card_mode: pricesVerified ? "quoted_package" : "klook_single",
@@ -3626,10 +4131,13 @@ function assembleLivePreviewFromCandidate(payload, candidate) {
     stay_nights: nights,
     requested_check_in: stayDates.checkIn,
     requested_check_out: stayDates.checkOut,
+    hotel_primary_url: aviasalesHotelUrl,
     klook_hotel_url: klookHotelUrl,
     klook_hotel_direct_url: klookHotelDirectUrl,
+    klook_hotel_direct_url_template: klookHotelDirectUrl,
+    klook_hotel_base_url: klookHotelDirectUrl,
     aviasales_hotel_url: aviasalesHotelUrl,
-    hotel_search_mode: pricesVerified ? "quoted_amadeus_xotelo" : "klook_deeplink",
+    hotel_search_mode: pricesVerified ? "quoted_amadeus_xotelo" : "aviasales_hotels_link",
     hotels: candidate.hotels,
     packages: [],
     stay_budget_min: Math.round(Number(candidate.stay_budget_min) || 0),
@@ -3640,7 +4148,7 @@ function assembleLivePreviewFromCandidate(payload, candidate) {
     package_floor_euro: candidate.package_floor_euro,
     flight_price_euro: fp,
     flight_price_reserved_euro: fpReserved,
-    flight_price_is_indicative: pricesVerified ? flight.priceSource === "travelpayouts" : flightIndicative,
+    flight_price_is_indicative: pricesVerified ? isTravelpayoutsFlightSource(flight.priceSource) : flightIndicative,
     fits_budget_pessimistic: candidate.fits_budget_pessimistic === true,
     within_budget: candidate.within_budget === true,
     package_worst_case_euro: candidate.package_worst_case_euro,
@@ -3651,8 +4159,9 @@ function assembleLivePreviewFromCandidate(payload, candidate) {
       ? `Prezzi trovati ora: volo da Aviasales e hotel da ${refHotel.bestPriceProviderName || (refHotel.priceSource === "xotelo" ? "Xotelo" : "fornitore verificato")}. Verifica il totale prima di prenotare.`
       : flight.priceSource === "estimate"
         ? `Prezzo volo non verificato dal feed: prima apri Aviasales. Klook è filtrato in modo indicativo entro circa €${hotelBudget.hotelMaxPerNight}/notte, ma la combinazione vale solo se il volo reale lascia budget residuo.`
-        : `Apriamo Klook con destinazione, date, ospiti e filtro prezzo entro circa €${hotelBudget.hotelMaxPerNight}/notte (budget hotel €${hotelBudget.hotelTotalBudget} dopo il volo).`,
+        : `Nessun prezzo hotel verificato da Xotelo/Amadeus: apriamo Aviasales Hotels con destinazione e date già impostate, senza mostrare prezzi hotel inventati.`,
     prices_verified: pricesVerified,
+    hotel_price_verified: pricesVerified,
     offer_is_estimate: !pricesVerified && flight.priceSource === "estimate",
     package_plan_total_euro: packageTotal,
     budget_overrun_likely: overrunLikely,
@@ -3661,13 +4170,256 @@ function assembleLivePreviewFromCandidate(payload, candidate) {
 }
 
 function buildEmergencyLivePreview(payload) {
-  const { code, label } = resolveLiveDestination(payload);
-  const { departDate, returnDate } = resolveTravelDates(payload);
-  const est = buildEstimatedFlightOffers(payload, code, label, departDate, returnDate)[0];
-  const candidate =
-    buildSimpleLiveCandidate(est, payload) ||
-    buildCandidateFromFlight(est, payload, { relaxed: true, requireQuoted: false });
-  return assembleLivePreviewFromCandidate(payload, candidate);
+  return null;
+}
+
+function buildAviasalesHotelSearchCandidate(flight, user) {
+  const B = Math.max(0, Number(user.budget) || 0);
+  normalizeFlightPricesForPassengers(flight, user);
+  const fp = Math.round(Number(flight.price) || 0);
+  if (!isTravelpayoutsFlightSource(flight.priceSource) || !Number.isFinite(fp) || fp <= 0) return null;
+
+  attachFlightAffiliateLinks(flight, user);
+  const nights = stayNightsForOffer(flight, user);
+  const dates = stayDatesForOffer(flight, user);
+  const destCity =
+    sanitizeCityLabelForKlook(
+      plainDestinationName(user.destinazione_preferita) ||
+        plainDestinationName(flight.destination) ||
+        destinationLabelFromCode(flight.destinationCode) ||
+        flight.destination
+    ) || "Destinazione";
+  const hotelSearchUrl = buildAviasalesHotelUrlFromFlight(flight, user);
+  const stayHotel = {
+    slug: `aviasales-hotels-${sanitizeIata3(flight.destinationCode) || "city"}`,
+    name: `Hotel a ${destCity}`,
+    price: 0,
+    stayNights: nights,
+    priceSource: "aviasales_hotels_link",
+    priceVerified: false,
+    bookingLink: hotelSearchUrl,
+    directBookingLink: hotelSearchUrl,
+    photos: [],
+    structureType: "Hotel",
+    roomType: user.tipo_camera || "Doppia",
+    mealType: user.tipo_pasto || "Solo pernotto",
+  };
+
+  return {
+    utente_id: user.id,
+    flight,
+    flights: [flight],
+    hotels: [stayHotel, stayHotel, stayHotel],
+    card_mode: "hotel_search",
+    destination_city: destCity,
+    hotel_stay_quota: 0,
+    hotel_price_euro: 0,
+    package_total_euro: fp,
+    hotel_max_per_night_euro: 0,
+    requested_check_in: dates.checkIn,
+    requested_check_out: dates.checkOut,
+    aviasales_hotel_url: hotelSearchUrl,
+    stay_nights: nights,
+    prezzo_totale: fp,
+    risparmio: Math.max(0, Math.floor(B - fp)),
+    package_worst_case_euro: fp,
+    budget_headroom_euro: Math.max(0, B - fp),
+    stay_budget_min: 0,
+    stay_budget_max: 0,
+    stay_allocation_euro: 0,
+    hotel_budget_total_euro: Math.max(0, B - fp),
+    hotel_budget_max_per_night_euro: 0,
+    flight_price_euro: fp,
+    flight_price_reserved_euro: fp,
+    flight_price_is_indicative: false,
+    fits_budget_pessimistic: false,
+    within_budget: false,
+    package_floor_euro: Math.ceil(B * PACKAGE_MIN_RATIO),
+    scade_il: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
+    prices_verified: false,
+    hotel_price_verified: false,
+  };
+}
+
+function buildManualKiwiFlightUrl({ from, to, departure, returnDate, user, applySearchFilters = true }) {
+  const origin = sanitizeIata3(from);
+  const destination = sanitizeIata3(to);
+  if (!origin || !destination || !isIsoDate(departure) || !isIsoDate(returnDate)) return "";
+
+  const pax = parseTripPassengers(user || {});
+  const flight = {
+    from: origin,
+    destinationCode: destination,
+    departDate: departure,
+    returnDate,
+    destination: destinationLabelFromCode(destination),
+  };
+
+  let kiwiUrl =
+    buildKiwiSearchResultsUrl(flight, pax) || buildKiwiDirectSearchUrl(flight, pax);
+
+  if (!kiwiUrl) {
+    const kiwi = new URL("https://www.kiwi.com/deep");
+    kiwi.searchParams.set("from", origin);
+    kiwi.searchParams.set("to", destination);
+    kiwi.searchParams.set("departure", departure);
+    kiwi.searchParams.set("return", returnDate);
+    kiwiUrl = kiwi.toString();
+  }
+
+  if (applySearchFilters === "hand_only") {
+    kiwiUrl = applyKiwiSearchOptions(kiwiUrl, user || {}, { handBaggageOnly: true });
+  } else if (applySearchFilters !== false) {
+    kiwiUrl = applyKiwiSearchOptions(kiwiUrl, user || {});
+  }
+
+  const link = new URL("https://c111.travelpayouts.com/click");
+  link.searchParams.set("shmarker", process.env.TRAVELPAYOUTS_MARKER || "725780");
+  link.searchParams.set("promo_id", "3791");
+  link.searchParams.set("source_type", "customlink");
+  link.searchParams.set("type", "click");
+  link.searchParams.set("custom_url", kiwiUrl);
+  return link.toString();
+}
+
+function buildTravelpayoutsKiwiManualUrl(opts) {
+  return buildManualKiwiFlightUrl(opts);
+}
+
+function buildManualKlookListUrlTemplate({ city, checkIn, checkOut, adults, child_num, age, destIata }) {
+  const iata3 = sanitizeIata3(destIata);
+  const cityHint =
+    plainDestinationName(city) || destinationLabelFromCode(iata3) || String(city || iata3 || "");
+  const cityLabel = klookSearchCityLabel(iata3, cityHint) || "Destination";
+  return (
+    buildKlookHotelSearchUrl({
+      city: cityLabel,
+      destIata,
+      checkIn,
+      checkOut,
+      adults,
+      child_num,
+      age,
+      currency: "EUR",
+    }) || ""
+  );
+}
+
+function buildManualKlookAffiliateUrlTemplate(directTemplate) {
+  const direct = String(directTemplate || "").trim();
+  if (!direct) return "";
+  return direct;
+}
+
+async function buildManualKiwiKlookPreview(payload) {
+  const user = { ...payload };
+  const surprise = isSurpriseSearch(user);
+  let surprisePick = null;
+  if (surprise) {
+    surprisePick = await pickSurpriseDestination(user);
+    user.destinazione_preferita = surprisePick.label;
+    user.destinazione_iata = surprisePick.code;
+  }
+  const { code: destCode, label: destLabel } = resolveLiveDestination(user);
+  const { departDate, returnDate } = resolveTravelDates(user);
+  const origin =
+    sanitizeIata3(resolveFlightOriginCodes(user.aeroporto_partenza)[0]) ||
+    sanitizeIata3(user.aeroporto_partenza);
+  const destination = sanitizeIata3(destCode || user.destinazione_iata);
+  if (!origin || !destination) {
+    const err = new Error("Partenza o destinazione non riconosciuta. Scegli un aeroporto dai suggerimenti.");
+    err.code = "DESTINATION_UNSUPPORTED";
+    throw err;
+  }
+  const pax = parseTripPassengers(user);
+  const klookGuests = klookGuestParams(user);
+  const nights = stayNightsBetweenIsoDates(departDate, returnDate);
+  const destinationCityIt =
+    plainDestinationName(destLabel) || destinationLabelFromCode(destination) || destLabel || destination;
+  const klookCityLabel = klookSearchCityLabel(destination, destinationCityIt);
+  const kiwiUrl = buildManualKiwiFlightUrl({
+    from: origin,
+    to: destination,
+    departure: departDate,
+    returnDate,
+    user,
+    applySearchFilters: surprise ? "hand_only" : true,
+  });
+  const klookPage = resolveKlookCityPage(destination, klookCityLabel);
+  const klookDirectTemplate = buildManualKlookListUrlTemplate({
+    city: klookCityLabel,
+    destIata: destination,
+    checkIn: departDate,
+    checkOut: returnDate,
+    adults: klookGuests.adults,
+    child_num: klookGuests.child_num,
+    age: klookGuests.age,
+  });
+  const klookTemplate = buildManualKlookAffiliateUrlTemplate(klookDirectTemplate);
+  const flight = {
+    from: origin,
+    fromName: origin,
+    destination: destinationCityIt,
+    destinationCode: destination,
+    klookCityLabel,
+    departDate,
+    returnDate,
+    passengersAdults: pax.adults,
+    passengersChildren: pax.children,
+    passengersInfants: pax.infants,
+    priceSource: "manual_kiwi",
+    flightLink: kiwiUrl,
+    flightLinkSource: "kiwi_manual",
+    airHelpLink: affiliateAirHelpUrl(),
+  };
+  const preview = {
+    card_mode: "manual_kiwi_klook",
+    partenza: origin,
+    budget: Math.max(0, Number(user.budget) || 0),
+    persone: String(user.persone || pax.adults),
+    passengers: pax,
+    passengers_count: totalTripGuests(user),
+    passengers_summary: passengerSummaryIt(user),
+    solo_voli_diretti: surprise ? 0 : getSoloVoliDiretti(user) ? 1 : 0,
+    bagaglio: surprise ? "Solo cabina" : String(user.bagaglio || "Solo cabina"),
+    kiwi_filters_applied: 1,
+    destinazione_sorpresa: surprise ? 1 : 0,
+    surprise_destination: surprise
+      ? {
+          label: destinationCityIt,
+          klook_label: klookCityLabel,
+          iata: destination,
+          origin_iata: resolveSurpriseOrigin(user),
+          world_region: surpriseWorldRegion(destination),
+          pick_source: surprisePick?.pick_source || "random",
+          budget_estimate: estimateSurprisePackageTotal(
+            user,
+            { label: destinationCityIt, iata: destination },
+            null
+          ),
+        }
+      : null,
+    flight,
+    destination_city: destinationCityIt,
+    klook_city_label: klookCityLabel,
+    requested_check_in: departDate,
+    requested_check_out: returnDate,
+    stay_nights: nights,
+    kiwi_flight_url: kiwiUrl,
+    klook_hotel_url_template: klookTemplate,
+    klook_hotel_direct_url_template: klookDirectTemplate,
+    klook_hotel_base_url: klookDirectTemplate,
+    klook_city_page_slug: klookPage?.kind === "city" ? String(klookPage.slug || "") : "",
+    klook_destination_page_slug:
+      klookPage?.kind === "destination" ? String(klookPage.slug || "") : "",
+    prices_verified: false,
+    flight_price_euro: 0,
+    hotel_price_euro: 0,
+    hotel_stay_quota: 0,
+    stay_pricing_disclaimer:
+      "Cerca il volo su Kiwi, inserisci il prezzo totale trovato, poi Partiamo calcola il budget hotel residuo e apre Klook filtrato.",
+  };
+  return repairKlookPreviewTemplates(preview);
 }
 
 /**
@@ -3706,9 +4458,7 @@ function buildSimpleLiveCandidate(flight, user) {
     maxPricePerNight: maxPerNight,
     maxTotalPrice: quota,
   });
-  const klookHotelUrl =
-    wrapTravelpayoutsAffiliateUrl(klookHotelDirectUrl) ||
-    klookHotelDirectUrl;
+  const klookHotelUrl = klookHotelDirectUrl;
   const aviasalesHotelUrl = buildAviasalesHotelUrlFromFlight(flight, user);
 
   const stayHotel = {
@@ -3764,66 +4514,11 @@ function buildSimpleLiveCandidate(flight, user) {
 }
 
 /**
- * Ricerca live (home): voli Aviasales → budget locale → due pulsanti Klook/Voli.
+ * Ricerca live (home): solo voli Travelpayouts reali.
+ * Hotel: prezzo solo se verificato da Xotelo/Amadeus, altrimenti link Aviasales Hotels senza prezzo.
  */
 async function getLiveSearchPreview(payload) {
-  const user = payload;
-  const { code: destCode, label: destLabel } = resolveLiveDestination(user);
-
-  let flightsRaw = [];
-  try {
-    flightsRaw = await searchFlightsAzair(user, {
-      allowEstimate: false,
-      exactDates: true,
-    });
-  } catch (_error) {
-    flightsRaw = [];
-  }
-
-  if (!flightsRaw.length) {
-    const { departDate, returnDate } = resolveTravelDates(user);
-    flightsRaw = buildEstimatedFlightOffers(user, destCode, destLabel, departDate, returnDate);
-  }
-
-  for (const f of flightsRaw) normalizeFlightPricesForPassengers(f, user);
-  const flightsSorted = [...flightsRaw].sort((a, b) => Number(a.price) - Number(b.price));
-  const flight =
-    flightsSorted.find((f) => isBookableFlightLink(f.flightLink)) || flightsSorted[0];
-  if (!flight) {
-    return buildEmergencyLivePreview(user);
-  }
-  const budgetNum = Math.round(Number(user.budget) || 0);
-  const flightTotal = Math.round(Number(flight.price) || flightPriceTotalForUser(flight, user) || 0);
-  const nightsForBudget = stayNightsForOffer(flight, user);
-  const minHotelForBudget = minHotelStayBudgetForDestination(
-    nightsForBudget,
-    flight.destinationCode || user.destinazione_iata,
-    flight.destination || destLabel
-  );
-  if (
-    budgetNum > 0 &&
-    flightTotal > 0 &&
-    flightTotal + minHotelForBudget > budgetNum
-  ) {
-    throw budgetTooTightError(user, nightsForBudget, flightTotal, flight.priceSource, minHotelForBudget);
-  }
-
-  let candidate =
-    flight.priceSource === "estimate"
-      ? buildSimpleLiveCandidate(flight, user)
-      : (await buildCandidateFromFlight(flight, user, { relaxed: true, requireQuoted: false })) ||
-        buildSimpleLiveCandidate(flight, user);
-  if (!candidate) {
-    return buildEmergencyLivePreview(user);
-  }
-
-  const preview = assembleLivePreviewFromCandidate(payload, candidate);
-  if (!preview) {
-    const err = new Error("Impossibile preparare l'offerta in questo momento.");
-    err.code = "LIVE_PREVIEW_FAILED";
-    throw err;
-  }
-  return preview;
+  return buildManualKiwiKlookPreview(payload);
 }
 
 async function processUserForOffers(user) {

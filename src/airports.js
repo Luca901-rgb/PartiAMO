@@ -17,6 +17,20 @@ function isItalyCountry(country) {
   return c === "italy" || c === "italia";
 }
 
+function countryIt(country) {
+  const map = {
+    Italy: "Italia",
+    France: "Francia",
+    Spain: "Spagna",
+    Cyprus: "Cipro",
+    Romania: "Romania",
+    Greece: "Grecia",
+    Germany: "Germania",
+    "United Kingdom": "Regno Unito",
+  };
+  return map[country] || country || "";
+}
+
 /** Città italiane → aeroporto principale (evita RMA Australia per «Roma»). */
 const ITALIAN_CITY_PRIMARY_IATA = {
   roma: "FCO",
@@ -109,7 +123,7 @@ const POPULAR_DEPARTURE_IATA = [
 function searchAirports(query, limit = 12) {
   const list = loadAirports();
   const byIata = airportsByIata;
-  const cap = Math.max(1, Math.min(30, Number(limit) || 12));
+  const cap = Math.max(1, Math.min(80, Number(limit) || 12));
   const q = foldAscii(query);
 
   if (!q) {
@@ -136,16 +150,21 @@ function searchAirports(query, limit = 12) {
     pechino: ["beijing", "pek", "pkx"],
     beijing: ["pechino", "pek", "pkx"],
     peking: ["beijing", "pechino", "pek"],
+    cipro: ["cyprus", "lca", "pfo"],
+    cyprus: ["cipro", "lca", "pfo"],
   };
   const terms = [q, ...(QUERY_ALIASES[q] || [])];
 
   const scored = [];
   for (const a of list) {
+    if ((q === "roma" || q === "rome") && foldAscii(a.country) === "romania") continue;
+    if ((q === "roma" || q === "rome") && a.iata === "RMA") continue;
     let s = 100;
     const iataL = a.iata.toLowerCase();
     const cityF = foldAscii(a.city);
     const nameF = foldAscii(a.name);
     const countryF = foldAscii(a.country);
+    const countryItF = foldAscii(countryIt(a.country));
 
     for (const t of terms) {
       if (!t) continue;
@@ -154,6 +173,10 @@ function searchAirports(query, limit = 12) {
         break;
       }
       if ((t === "roma" || t === "rome") && a.iata === "RMA") {
+        s = 99;
+        continue;
+      }
+      if ((t === "roma" || t === "rome") && foldAscii(a.country) === "romania") {
         s = 99;
         continue;
       }
@@ -173,7 +196,8 @@ function searchAirports(query, limit = 12) {
       if (cityF === t) s = Math.min(s, 0);
       else if (cityF.startsWith(t)) s = Math.min(s, 2);
       else if (nameF.startsWith(t)) s = Math.min(s, 3);
-      else if (countryF.startsWith(t) || countryF === t) s = Math.min(s, 7);
+      else if (countryItF === t || countryF === t) s = Math.min(s, 6);
+      else if (t.length >= 5 && (countryItF.startsWith(t) || countryF.startsWith(t))) s = Math.min(s, 7);
     }
 
     if (s < 100) scored.push({ a, s });
