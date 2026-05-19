@@ -161,8 +161,6 @@ app.get("/api/klook-hotel-url", (req, res) => {
       const nights = stayNightsBetweenIsoDates(checkIn, checkOut) || 1;
       url = applyKlookBudgetToUrl(url, budget, nights);
     }
-    const { buildKlookAffiliateUrl } = require("./klook-affiliate");
-    url = buildKlookAffiliateUrl(url) || url;
     res.json({ ok: true, url });
   } catch (e) {
     console.error("[klook-hotel-url]", e);

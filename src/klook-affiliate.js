@@ -370,7 +370,10 @@ function buildKlookAffiliateUrl(klookCityUrl) {
 function appendKlookAffiliateTracking(urlString) {
   const direct = String(urlString || "").trim();
   if (!direct || isKlookListHotelUrl(direct)) return "";
-  return buildKlookAffiliateUrl(direct) || direct;
+  if (shouldWrapKlookAffiliate()) {
+    return buildKlookAffiliateUrl(direct) || direct;
+  }
+  return direct;
 }
 
 function isKlookHotelBrowseUrl(urlString) {
@@ -763,7 +766,7 @@ function buildKlookHotelSearchUrl({
  */
 
 function shouldWrapKlookAffiliate() {
-  return String(process.env.KLOOK_AFFILIATE_WRAP || "1").trim() !== "0";
+  return String(process.env.KLOOK_AFFILIATE_WRAP || "0").trim() === "1";
 }
 
 function wrapTravelpayoutsAffiliateUrl(targetUrl) {
@@ -845,7 +848,7 @@ function repairKlookPreviewTemplates(preview) {
     const clean = stripKlookPriceParams(direct);
     preview.klook_hotel_direct_url_template = clean;
     preview.klook_hotel_base_url = clean;
-    preview.klook_hotel_url_template = buildKlookAffiliateUrl(clean) || clean;
+    preview.klook_hotel_url_template = appendKlookAffiliateTracking(clean) || clean;
   }
   const klookUrl = String(preview.klook_hotel_url || "").trim();
   if (klookUrl && /tp\.media\/r/i.test(klookUrl)) {

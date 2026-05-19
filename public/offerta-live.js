@@ -289,7 +289,7 @@ function buildKlookAffiliateUrl(klookCityUrl) {
 function appendKlookAffiliateTracking(urlString) {
   const direct = String(urlString || "").trim();
   if (!direct || isKlookListHotelUrl(direct)) return "";
-  return buildKlookAffiliateUrl(direct) || direct;
+  return direct;
 }
 
 function isKlookListHotelUrl(urlString) {
