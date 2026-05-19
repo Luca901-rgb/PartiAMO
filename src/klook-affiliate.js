@@ -362,9 +362,15 @@ function stayNightsForPreview(preview) {
   return Math.max(1, Math.floor(Number(preview?.stay_nights) || 1));
 }
 
-/** URL Klook pronto all’uso: niente parametri affiliato extra (Klook li aggiunge da solo). */
+/** Wrap affiliato controllato (c111/click) — mai tp-em che riscrive in /it/hotels/list/. */
+function buildKlookAffiliateUrl(klookCityUrl) {
+  return wrapTravelpayoutsAffiliateUrl(klookCityUrl);
+}
+
 function appendKlookAffiliateTracking(urlString) {
-  return String(urlString || "").trim();
+  const direct = String(urlString || "").trim();
+  if (!direct || isKlookListHotelUrl(direct)) return "";
+  return buildKlookAffiliateUrl(direct) || direct;
 }
 
 function isKlookHotelBrowseUrl(urlString) {
@@ -531,28 +537,30 @@ function buildKlookHotelDestinationPageUrl({
   return u.toString();
 }
 
-function buildKlookHotelsListUrl({
-  city,
+/** Deprecato: /hotels/list/ → homepage. Non usare. */
+function buildKlookHotelsListUrl() {
+  return "";
+}
+
+/** Fallback: ricerca generica en-GB (mai /hotels/list/). */
+function buildKlookHotelsGenericFallbackUrl({
+  query,
   checkIn,
   checkOut,
   adults,
   child_num,
+  age,
+  rooms,
   maxTotalPrice,
-  destIata,
-  iata,
 } = {}) {
-  const iata3 = sanitizeIata3(destIata || iata);
-  const cityLabel = klookSearchCityLabel(iata3, sanitizeCityLabel(city) || "");
-  if (!cityLabel || !isIsoDate(checkIn) || !isIsoDate(checkOut)) return "";
-  const u = new URL(KLOOK_HOTELS_LIST_BASE);
-  u.searchParams.set("city", cityLabel);
-  u.searchParams.set("checkIn", String(checkIn).slice(0, 10));
-  u.searchParams.set("checkOut", String(checkOut).slice(0, 10));
-  u.searchParams.set("adult", String(Math.max(1, Math.min(9, Number(adults) || 1))));
-  const children = Math.max(0, Math.min(8, Number(child_num) || 0));
-  if (children > 0) u.searchParams.set("child_num", String(children));
+  const q = sanitizeCityLabel(query || "");
+  if (!q || !isIsoDate(checkIn) || !isIsoDate(checkOut)) return "";
+  const u = new URL(`${KLOOK_SITE}/hotels/`);
+  u.searchParams.set("city_id", "0");
+  u.searchParams.set("query", q);
+  appendKlookStayParams(u, { checkIn, checkOut, adults, child_num, age, rooms });
   const max = Math.floor(Number(maxTotalPrice) || 0);
-  if (max >= MIN_KLOOK_MAX_PRICE_EUR) u.searchParams.set("maxPrice", String(max));
+  if (max >= MIN_KLOOK_MAX_PRICE_EUR) u.searchParams.set("max_total_price", String(max));
   return u.toString();
 }
 
@@ -603,8 +611,12 @@ function applyKlookBudgetToUrl(urlString, hotelBudgetTotalEuro, stayNights, opts
     return raw;
   }
   const pathForKlook = u.pathname.replace(/^\/(en|it|fr|de|es|zh|ja|ko)(?=\/)/i, "") || u.pathname;
-  const isCityPage = /\/hotels\/(city|destination)\//i.test(pathForKlook) || /\/hotels\/(city|destination)\//i.test(u.pathname);
-  if (isCityPage) {
+  const isCityPage =
+    /\/hotels\/(city|destination)\//i.test(pathForKlook) ||
+    /\/hotels\/(city|destination)\//i.test(u.pathname);
+  const isGenericSearch =
+    /\/hotels\/?$/i.test(pathForKlook) && (u.searchParams.has("query") || u.searchParams.get("city_id") === "0");
+  if (isCityPage || isGenericSearch) {
     u.searchParams.delete("max_total_price");
     const minHotel = Number(MIN_KLOOK_MAX_PRICE_EUR) || 40;
     if (total >= minHotel) {
@@ -613,9 +625,7 @@ function applyKlookBudgetToUrl(urlString, hotelBudgetTotalEuro, stayNights, opts
     return u.toString();
   }
   if (/\/hotels\/list\//i.test(pathForKlook)) {
-    u.searchParams.delete("maxPrice");
-    if (total >= MIN_KLOOK_MAX_PRICE_EUR) u.searchParams.set("maxPrice", String(total));
-    return u.toString();
+    return "";
   }
   if (isKlookKeywordSearchUrl(u.toString()) && total < MIN_KLOOK_MAX_PRICE_EUR) {
     taxesOnly = true;
@@ -667,35 +677,12 @@ function cityLabelFromKlookCityPath(pathname) {
     .join(" ");
 }
 
-function tryKlookListUrlFromSearchResult(u, maxTotalPrice) {
-  const city =
-    u.searchParams.get("override") ||
-    u.searchParams.get("title") ||
-    u.searchParams.get("svalue") ||
-    "";
-  const checkIn = u.searchParams.get("check_in") || u.searchParams.get("checkIn");
-  const checkOut = u.searchParams.get("check_out") || u.searchParams.get("checkOut");
-  const adults = u.searchParams.get("adult_num") || u.searchParams.get("adult");
-  const cityName = city || cityLabelFromKlookCityPath(u.pathname);
-  if (!cityName || !isIsoDate(checkIn) || !isIsoDate(checkOut)) return "";
-  return buildKlookHotelsListUrl({
-    city: cityName,
-    checkIn,
-    checkOut,
-    adults,
-    maxTotalPrice,
-  });
+function tryKlookListUrlFromSearchResult() {
+  return "";
 }
 
-function tryKlookListUrlFromAnyHotelUrl(urlString, maxTotalPrice) {
-  try {
-    const u = new URL(String(urlString || "").trim());
-    if (/\/hotels\/(city|destination)\//i.test(u.pathname)) return "";
-    if (/\/hotels\/list\//i.test(u.pathname)) return u.toString();
-    return tryKlookListUrlFromSearchResult(u, maxTotalPrice);
-  } catch (_e) {
-    return "";
-  }
+function tryKlookListUrlFromAnyHotelUrl() {
+  return "";
 }
 
 
@@ -753,7 +740,16 @@ function buildKlookHotelSearchUrl({
   });
   if (destUrl) return destUrl;
 
-  return "";
+  return buildKlookHotelsGenericFallbackUrl({
+    query: searchLabel || cityLabel || englishKeywordForKlook(iata3, cityLabel),
+    checkIn,
+    checkOut,
+    adults,
+    child_num,
+    age,
+    rooms,
+    maxTotalPrice: total,
+  });
 }
 
 
@@ -767,7 +763,7 @@ function buildKlookHotelSearchUrl({
  */
 
 function shouldWrapKlookAffiliate() {
-  return String(process.env.KLOOK_AFFILIATE_WRAP || "0").trim() === "1";
+  return String(process.env.KLOOK_AFFILIATE_WRAP || "1").trim() !== "0";
 }
 
 function wrapTravelpayoutsAffiliateUrl(targetUrl) {
@@ -849,11 +845,7 @@ function repairKlookPreviewTemplates(preview) {
     const clean = stripKlookPriceParams(direct);
     preview.klook_hotel_direct_url_template = clean;
     preview.klook_hotel_base_url = clean;
-    if (!aff || /tp\.media\/r/i.test(aff)) {
-      preview.klook_hotel_url_template = shouldWrapKlookAffiliate()
-        ? wrapTravelpayoutsAffiliateUrl(clean) || clean
-        : clean;
-    }
+    preview.klook_hotel_url_template = buildKlookAffiliateUrl(clean) || clean;
   }
   const klookUrl = String(preview.klook_hotel_url || "").trim();
   if (klookUrl && /tp\.media\/r/i.test(klookUrl)) {
@@ -908,6 +900,10 @@ module.exports = {
   stripKlookPriceParams,
 
   appendKlookAffiliateTracking,
+
+  buildKlookAffiliateUrl,
+
+  buildKlookHotelsGenericFallbackUrl,
 
   repairKlookPreviewTemplates,
 

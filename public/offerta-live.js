@@ -3,6 +3,35 @@ const FLIGHT_FALLBACK_COVER =
 const AFFILIATE_KIWI_FALLBACK = "https://kiwi.tpk.lv/UiOvgyTf";
 const FLIGHT_PRICE_STORAGE_KEY = "partiamo_manual_flight_price";
 const KLOOK_HOTEL_ORIGIN = "https://www.klook.com/en-GB";
+const KLOOK_TP_MARKER = "725780";
+const KLOOK_TP_PROMO = "4110";
+
+(function purgeStaleKlookPreview() {
+  try {
+    const raw = sessionStorage.getItem("partiamo_live_preview");
+    if (!raw) return;
+    const p = JSON.parse(raw);
+    const blob = [
+      p.klook_hotel_url,
+      p.klook_hotel_direct_url,
+      p.klook_hotel_direct_url_template,
+      p.klook_hotel_url_template,
+      p.klook_hotel_base_url,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    if (
+      /\/hotels\/list\//i.test(blob) ||
+      /\/it\/hotels\//i.test(blob) ||
+      /checkIn=/i.test(blob) ||
+      /\bmaxPrice=/i.test(blob)
+    ) {
+      sessionStorage.removeItem("partiamo_live_preview");
+    }
+  } catch (_e) {
+    sessionStorage.removeItem("partiamo_live_preview");
+  }
+})();
 
 const KLOOK_COPY_DEFAULT =
   "Cerca il volo su Kiwi, inserisci il prezzo totale trovato, poi Partiamo calcola il budget hotel residuo e apre Klook filtrato.";
@@ -204,7 +233,10 @@ function applyKlookBudgetToUrl(urlString, hotelBudgetTotalEuro, stayNights, opts
     return raw;
   }
   const pathForKlook = u.pathname.replace(/^\/(en|it|fr|de|es|zh|ja|ko)(?=\/)/i, "") || u.pathname;
-  if (/\/hotels\/(city|destination)\//i.test(pathForKlook)) {
+  if (
+    /\/hotels\/(city|destination)\//i.test(pathForKlook) ||
+    (/\/hotels\/?$/i.test(pathForKlook) && u.searchParams.has("query"))
+  ) {
     u.searchParams.delete("max_total_price");
     if (total >= MIN_KLOOK_MAX_PRICE_EUR) u.searchParams.set("max_total_price", String(total));
     return u.toString();
@@ -242,8 +274,22 @@ function klookFilterPerNightCap(total, nights) {
   return Math.max(strict + 12, Math.ceil(strict * 1.25));
 }
 
+function buildKlookAffiliateUrl(klookCityUrl) {
+  const target = String(klookCityUrl || "").trim();
+  if (!target || isKlookListHotelUrl(target)) return "";
+  const link = new URL("https://c111.travelpayouts.com/click");
+  link.searchParams.set("shmarker", KLOOK_TP_MARKER);
+  link.searchParams.set("promo_id", KLOOK_TP_PROMO);
+  link.searchParams.set("source_type", "customlink");
+  link.searchParams.set("type", "click");
+  link.searchParams.set("custom_url", target);
+  return link.toString();
+}
+
 function appendKlookAffiliateTracking(urlString) {
-  return String(urlString || "").trim();
+  const direct = String(urlString || "").trim();
+  if (!direct || isKlookListHotelUrl(direct)) return "";
+  return buildKlookAffiliateUrl(direct) || direct;
 }
 
 function isKlookListHotelUrl(urlString) {
@@ -277,6 +323,18 @@ function buildKlookBrowseUrlFromPreview(preview) {
   const destSlug = String(preview?.klook_destination_page_slug || "").trim();
   if (destSlug) {
     const u = new URL(`${KLOOK_HOTEL_ORIGIN}/destination/${destSlug}/`);
+    u.searchParams.set("check_in", checkIn);
+    u.searchParams.set("check_out", checkOut);
+    u.searchParams.set("adult_num", String(adults));
+    return u.toString();
+  }
+  const query = String(
+    preview?.klook_city_label || preview?.destination_city || f.destination || ""
+  ).trim();
+  if (query) {
+    const u = new URL(`${KLOOK_HOTEL_ORIGIN}/hotels/`);
+    u.searchParams.set("city_id", "0");
+    u.searchParams.set("query", query);
     u.searchParams.set("check_in", checkIn);
     u.searchParams.set("check_out", checkOut);
     u.searchParams.set("adult_num", String(adults));

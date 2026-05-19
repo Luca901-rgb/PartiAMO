@@ -122,7 +122,11 @@ app.use(
     etag: true,
     lastModified: true,
     setHeaders(res, filepath) {
-      if (/\.(js|css|html)$/i.test(filepath)) {
+      if (/\.(js|css)$/i.test(filepath)) {
+        res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
+      } else if (/\.html$/i.test(filepath)) {
         res.setHeader("Cache-Control", "public, max-age=0, must-revalidate");
       }
     },
@@ -157,6 +161,8 @@ app.get("/api/klook-hotel-url", (req, res) => {
       const nights = stayNightsBetweenIsoDates(checkIn, checkOut) || 1;
       url = applyKlookBudgetToUrl(url, budget, nights);
     }
+    const { buildKlookAffiliateUrl } = require("./klook-affiliate");
+    url = buildKlookAffiliateUrl(url) || url;
     res.json({ ok: true, url });
   } catch (e) {
     console.error("[klook-hotel-url]", e);

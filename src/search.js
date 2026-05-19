@@ -4308,7 +4308,7 @@ function buildManualKlookListUrlTemplate({ city, checkIn, checkOut, adults, chil
 function buildManualKlookAffiliateUrlTemplate(directTemplate) {
   const direct = String(directTemplate || "").trim();
   if (!direct) return "";
-  return direct;
+  return wrapTravelpayoutsAffiliateUrl(direct) || direct;
 }
 
 async function buildManualKiwiKlookPreview(payload) {
